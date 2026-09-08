@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from os import getenv
+from pathlib import Path
 import re
 from typing import Any
 from uuid import uuid4
@@ -8,6 +9,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config import get_settings
@@ -33,6 +35,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+image_storage_dir = Path(getenv("IMAGE_STORAGE_DIR") or getenv("UPLOAD_DIR") or "/app/uploads")
+if image_storage_dir.exists():
+    app.mount("/uploads", StaticFiles(directory=str(image_storage_dir)), name="uploads")
 
 
 class LoginPayload(BaseModel):
@@ -152,7 +158,7 @@ def _ensure_cliente_interacciones() -> None:
 
 @app.get("/")
 def root():
-    return Response(status_code=404)
+    return {"ok": True, "message": "Hola Bitstroid"}
 
 
 @app.post("/api/auth/login")
@@ -342,3 +348,64 @@ def obtener_preferencias_publicacion(usuario=Depends(verificar_jwt)):
             for row in publicaciones
         ],
     }
+
+
+@app.get("/api/publico/catalogo")
+def listar_catalogo_publico():
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.id AS publicacion_id,
+                       p.codigo AS publicacion_codigo,
+                       p.titulo,
+                       p.descripcion,
+                       p.creado_en AS publicacion_creado_en,
+                       i.id AS item_id,
+                       i.codigo AS item_codigo,
+                       i.nombre AS item_nombre,
+                       COALESCE(cat.nombre, '') AS categoria_nombre,
+                       COALESCE(cat.abreviatura, '') AS categoria_abreviatura,
+                       i.precio_venta_soles,
+                       i.stock_disponible,
+                       (
+                           SELECT f.ruta
+                           FROM inventario.publicacion_foto f
+                           WHERE f.publicacion_id = p.id
+                           ORDER BY COALESCE((f.metadata->>'es_portada')::boolean, false) DESC,
+                                    f.orden ASC,
+                                    f.creado_en ASC
+                           LIMIT 1
+                       ) AS imagen_url
+                FROM inventario.publicacion p
+                JOIN inventario.publicacion_item pi ON pi.publicacion_id = p.id
+                JOIN inventario.item i ON i.id = pi.item_id
+                LEFT JOIN costeo.categoria_compra cat ON cat.id = i.categoria_id
+                WHERE lower(COALESCE(p.estado, '')) = 'publicado'
+                  AND COALESCE(p.visible, true) = true
+                  AND lower(COALESCE(i.estado, '')) = 'disponible'
+                  AND COALESCE(i.stock_disponible, 0) > 0
+                ORDER BY p.creado_en DESC, pi.creado_en ASC
+                LIMIT 120
+                """
+            )
+            rows = cur.fetchall()
+    return [
+        {
+            "publicacionId": str(row["publicacion_id"]),
+            "codigo": row["publicacion_codigo"] or "",
+            "titulo": row["titulo"] or "",
+            "descripcion": row["descripcion"] or "",
+            "fechaCreacion": row["publicacion_creado_en"].isoformat() if row["publicacion_creado_en"] else "",
+            "imagenUrl": row["imagen_url"] or "",
+            "itemId": str(row["item_id"]),
+            "sku": row["item_codigo"] or "",
+            "nombre": row["item_nombre"] or "",
+            "categoriaNombre": row["categoria_nombre"] or "",
+            "categoriaAbreviatura": row["categoria_abreviatura"] or "",
+            "precio": float(row["precio_venta_soles"] or 0),
+            "moneda": "PEN",
+            "stockDisponible": int(row["stock_disponible"] or 0),
+        }
+        for row in rows
+    ]
