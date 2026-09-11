@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from os import getenv
 from pathlib import Path
+import asyncio
+import json
 import re
 from typing import Any
 from uuid import uuid4
@@ -9,6 +11,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -24,7 +27,7 @@ cors_origins = [
     origin.strip()
     for origin in getenv(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002,http://localhost:3003,http://127.0.0.1:3003",
     ).split(",")
     if origin.strip()
 ]
@@ -37,8 +40,8 @@ app.add_middleware(
 )
 
 image_storage_dir = Path(getenv("IMAGE_STORAGE_DIR") or getenv("UPLOAD_DIR") or "/app/uploads")
-if image_storage_dir.exists():
-    app.mount("/uploads", StaticFiles(directory=str(image_storage_dir)), name="uploads")
+image_storage_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(image_storage_dir)), name="uploads")
 
 
 class LoginPayload(BaseModel):
@@ -177,7 +180,7 @@ def login(payload: LoginPayload):
                 JOIN seguridad.categoria_rol cr ON cr.usuario_id = u.id
                 WHERE (lower(u.correo::text) = lower(%s)
                        OR lower(u.apodo::text) = lower(%s)
-                       OR u.whatsapp = %s)
+                       OR u.numero_documento = %s)
                   AND u.estado = 'activo'
                   AND cr.rol = 'cliente'
                   AND COALESCE(cr.activo, true) = true
@@ -366,6 +369,8 @@ def listar_catalogo_publico():
                        i.nombre AS item_nombre,
                        COALESCE(cat.nombre, '') AS categoria_nombre,
                        COALESCE(cat.abreviatura, '') AS categoria_abreviatura,
+                       COALESCE(estilo.codigo, 'default_azul') AS estilo_visual_codigo,
+                       COALESCE(estilo.nombre, 'Default azul') AS estilo_visual_nombre,
                        i.precio_venta_soles,
                        i.stock_disponible,
                        (
@@ -376,11 +381,21 @@ def listar_catalogo_publico():
                                     f.orden ASC,
                                     f.creado_en ASC
                            LIMIT 1
-                       ) AS imagen_url
+                       ) AS imagen_url,
+                       COALESCE((
+                           SELECT json_agg(json_build_object(
+                               'ruta', fotos.ruta,
+                               'orden', fotos.orden,
+                               'esPortada', COALESCE((fotos.metadata->>'es_portada')::boolean, false)
+                           ) ORDER BY COALESCE((fotos.metadata->>'es_portada')::boolean, false) DESC, fotos.orden ASC, fotos.creado_en ASC)
+                           FROM inventario.publicacion_foto fotos
+                           WHERE fotos.publicacion_id = p.id
+                       ), '[]'::json) AS fotos
                 FROM inventario.publicacion p
                 JOIN inventario.publicacion_item pi ON pi.publicacion_id = p.id
                 JOIN inventario.item i ON i.id = pi.item_id
                 LEFT JOIN costeo.categoria_compra cat ON cat.id = i.categoria_id
+                LEFT JOIN publicacion.categoria_estilo_visual estilo ON estilo.id = cat.estilo_visual_id
                 WHERE lower(COALESCE(p.estado, '')) = 'publicado'
                   AND COALESCE(p.visible, true) = true
                   AND lower(COALESCE(i.estado, '')) = 'disponible'
@@ -398,14 +413,74 @@ def listar_catalogo_publico():
             "descripcion": row["descripcion"] or "",
             "fechaCreacion": row["publicacion_creado_en"].isoformat() if row["publicacion_creado_en"] else "",
             "imagenUrl": row["imagen_url"] or "",
+            "fotos": row.get("fotos") or [],
             "itemId": str(row["item_id"]),
             "sku": row["item_codigo"] or "",
             "nombre": row["item_nombre"] or "",
             "categoriaNombre": row["categoria_nombre"] or "",
             "categoriaAbreviatura": row["categoria_abreviatura"] or "",
+            "estiloVisualCodigo": row["estilo_visual_codigo"] or "default_azul",
+            "estiloVisualNombre": row["estilo_visual_nombre"] or "Default azul",
             "precio": float(row["precio_venta_soles"] or 0),
             "moneda": "PEN",
             "stockDisponible": int(row["stock_disponible"] or 0),
         }
         for row in rows
     ]
+
+
+def _ultima_publicacion_publica() -> dict[str, Any] | None:
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.id AS publicacion_id,
+                       p.codigo,
+                       p.titulo,
+                       p.creado_en
+                FROM inventario.publicacion p
+                WHERE lower(COALESCE(p.estado, '')) = 'publicado'
+                  AND COALESCE(p.visible, true) = true
+                  AND EXISTS (
+                      SELECT 1
+                      FROM inventario.publicacion_item pi
+                      JOIN inventario.item i ON i.id = pi.item_id
+                      WHERE pi.publicacion_id = p.id
+                        AND lower(COALESCE(i.estado, '')) = 'disponible'
+                        AND COALESCE(i.stock_disponible, 0) > 0
+                  )
+                ORDER BY p.creado_en DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "publicacionId": str(row["publicacion_id"]),
+        "codigo": row["codigo"] or "",
+        "titulo": row["titulo"] or "",
+        "fechaCreacion": row["creado_en"].isoformat() if row["creado_en"] else "",
+    }
+
+
+@app.get("/api/publico/catalogo/eventos")
+async def eventos_catalogo_publico(since: str = ""):
+    async def stream():
+        ultima_fecha = since
+        while True:
+            try:
+                ultima = _ultima_publicacion_publica()
+                fecha = ultima["fechaCreacion"] if ultima else ""
+                if ultima and fecha and fecha != ultima_fecha:
+                    ultima_fecha = fecha
+                    payload = json.dumps(ultima, ensure_ascii=False)
+                    yield f"event: nueva-publicacion\ndata: {payload}\n\n"
+                else:
+                    yield ": ping\n\n"
+            except Exception:
+                yield ": error\n\n"
+            await asyncio.sleep(6)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
