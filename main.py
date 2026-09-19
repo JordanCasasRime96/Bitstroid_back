@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 from os import getenv
 from pathlib import Path
 import asyncio
+import base64
+import binascii
 import json
 import re
 from typing import Any
@@ -39,6 +41,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def cachear_imagenes(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/uploads/") and response.status_code == 200:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
 image_storage_dir = Path(getenv("IMAGE_STORAGE_DIR") or getenv("UPLOAD_DIR") or "/app/uploads")
 image_storage_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(image_storage_dir)), name="uploads")
@@ -61,6 +71,32 @@ class InteraccionPublicacionPayload(BaseModel):
     publicacionId: str
     categoria: str = ""
     evento: str = "click"
+
+
+class ConfirmacionPagoPayload(BaseModel):
+    total: float = Field(ge=0)
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    comprobanteNombre: str
+    comprobanteMimeType: str
+    comprobanteContenidoBase64: str
+    invitadoNombre: str = ""
+    invitadoWhatsapp: str = ""
+
+
+class SolicitudEnvioPayload(BaseModel):
+    tipo: str
+    destinatarioId: str = ""
+
+
+class DestinatarioEnvioPayload(BaseModel):
+    nombreCompleto: str
+    dni: str
+    direccion: str
+    referencia: str = ""
+    provincia: str
+    distrito: str
+    contacto: str
+    predeterminado: bool = False
 
 
 def _connection_kwargs() -> dict[str, Any]:
@@ -159,6 +195,70 @@ def _ensure_cliente_interacciones() -> None:
             )
 
 
+def _ensure_pago_tables() -> None:
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("CREATE SCHEMA IF NOT EXISTS publicacion")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS publicacion.configuracion_pago (
+                    id smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+                    contacto_celular varchar(30) NOT NULL DEFAULT '',
+                    qr_ruta text NOT NULL DEFAULT '',
+                    actualizado_por_usuario_id uuid REFERENCES seguridad.usuario(id) ON DELETE SET NULL,
+                    actualizado_en timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute("INSERT INTO publicacion.configuracion_pago (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS publicacion.solicitud_pago (
+                    id uuid PRIMARY KEY,
+                    usuario_id uuid REFERENCES seguridad.usuario(id) ON DELETE SET NULL,
+                    total numeric(14, 2) NOT NULL,
+                    items jsonb NOT NULL DEFAULT '[]'::jsonb,
+                    comprobante_ruta text NOT NULL,
+                    estado varchar(20) NOT NULL DEFAULT 'pendiente',
+                    invitado_nombre varchar(160) NOT NULL DEFAULT '',
+                    invitado_whatsapp varchar(30) NOT NULL DEFAULT '',
+                    validado_por_usuario_id uuid REFERENCES seguridad.usuario(id) ON DELETE SET NULL,
+                    validado_en timestamptz,
+                    envio_tipo varchar(30),
+                    envio_solicitado_en timestamptz,
+                    creado_en timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS invitado_nombre varchar(160) NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS invitado_whatsapp varchar(30) NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS validado_por_usuario_id uuid REFERENCES seguridad.usuario(id) ON DELETE SET NULL")
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS validado_en timestamptz")
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS envio_tipo varchar(30)")
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS envio_solicitado_en timestamptz")
+            cur.execute("CREATE SCHEMA IF NOT EXISTS cliente")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cliente.destinatario_envio (
+                    id uuid PRIMARY KEY,
+                    usuario_id uuid NOT NULL REFERENCES seguridad.usuario(id) ON DELETE CASCADE,
+                    nombre_completo varchar(180) NOT NULL,
+                    dni varchar(20) NOT NULL,
+                    direccion text NOT NULL,
+                    referencia text NOT NULL DEFAULT '',
+                    provincia varchar(120) NOT NULL,
+                    distrito varchar(120) NOT NULL,
+                    contacto varchar(30) NOT NULL,
+                    predeterminado boolean NOT NULL DEFAULT false,
+                    activo boolean NOT NULL DEFAULT true,
+                    creado_en timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS destinatario_id uuid REFERENCES cliente.destinatario_envio(id) ON DELETE SET NULL")
+            conn.commit()
+
+
 @app.get("/")
 def root():
     return {"ok": True, "message": "Hola Bitstroid"}
@@ -177,13 +277,10 @@ def login(payload: LoginPayload):
                 """
                 SELECT u.id, u.apodo, u.nombres, u.correo, u.whatsapp, u.hash_contrasena
                 FROM seguridad.usuario u
-                JOIN seguridad.categoria_rol cr ON cr.usuario_id = u.id
                 WHERE (lower(u.correo::text) = lower(%s)
                        OR lower(u.apodo::text) = lower(%s)
                        OR u.numero_documento = %s)
                   AND u.estado = 'activo'
-                  AND cr.rol = 'cliente'
-                  AND COALESCE(cr.activo, true) = true
                 LIMIT 1
                 """,
                 (credencial, credencial, credencial),
@@ -272,11 +369,8 @@ def me(usuario=Depends(verificar_jwt)):
                 """
                 SELECT u.id, u.apodo, u.nombres, u.correo, u.whatsapp, '' AS hash_contrasena
                 FROM seguridad.usuario u
-                JOIN seguridad.categoria_rol cr ON cr.usuario_id = u.id
                 WHERE u.id = %s
                   AND u.estado = 'activo'
-                  AND cr.rol = 'cliente'
-                  AND COALESCE(cr.activo, true) = true
                 LIMIT 1
                 """,
                 (usuario["sub"],),
@@ -353,6 +447,170 @@ def obtener_preferencias_publicacion(usuario=Depends(verificar_jwt)):
     }
 
 
+@app.get("/api/publico/configuracion-pago")
+def obtener_configuracion_pago_publica():
+    _ensure_pago_tables()
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT contacto_celular, qr_ruta FROM publicacion.configuracion_pago WHERE id = 1")
+            row = cur.fetchone() or {}
+    return {"contactoCelular": row.get("contacto_celular") or "", "qrRuta": row.get("qr_ruta") or ""}
+
+
+@app.post("/api/publico/pagos/confirmar")
+def confirmar_pago(payload: ConfirmacionPagoPayload, usuario=Depends(_jwt_opcional)):
+    _ensure_pago_tables()
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No hay productos para confirmar")
+    invitado_nombre = payload.invitadoNombre.strip()
+    invitado_whatsapp = payload.invitadoWhatsapp.strip()
+    if not usuario:
+        if not invitado_nombre:
+            raise HTTPException(status_code=400, detail="Ingresa tu nombre para continuar como invitado")
+        invitado_whatsapp = _normalizar_whatsapp(invitado_whatsapp)
+    if not payload.comprobanteMimeType.startswith("image/"):
+        raise HTTPException(status_code=400, detail="El comprobante debe ser una imagen")
+    try:
+        contenido = payload.comprobanteContenidoBase64.split(",", 1)[-1]
+        data = base64.b64decode(contenido, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Comprobante inválido") from exc
+    if not data or len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El comprobante debe pesar menos de 5 MB")
+
+    extension = Path(payload.comprobanteNombre).suffix.lower()
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        extension = ".jpg"
+    solicitud_id = str(uuid4())
+    carpeta = image_storage_dir / "pagos" / "comprobantes"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    nombre = f"{solicitud_id}{extension}"
+    (carpeta / nombre).write_bytes(data)
+    ruta = f"/uploads/pagos/comprobantes/{nombre}"
+
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO publicacion.solicitud_pago (
+                    id, usuario_id, total, items, comprobante_ruta, invitado_nombre, invitado_whatsapp
+                ) VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s)
+                """,
+                (solicitud_id, usuario.get("sub") if usuario else None, payload.total, json.dumps(payload.items, ensure_ascii=False), ruta, invitado_nombre, invitado_whatsapp),
+            )
+            conn.commit()
+    return {"ok": True, "solicitudId": solicitud_id, "estado": "pendiente"}
+
+
+@app.get("/api/cliente/almacen")
+def listar_almacen_cliente(usuario=Depends(verificar_jwt)):
+    _ensure_pago_tables()
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, total, items, creado_en, validado_en, envio_tipo, envio_solicitado_en, destinatario_id
+                FROM publicacion.solicitud_pago
+                WHERE usuario_id = %s AND estado = 'validado'
+                ORDER BY validado_en DESC NULLS LAST, creado_en DESC
+                """,
+                (usuario["sub"],),
+            )
+            rows = cur.fetchall()
+    return [{
+        "id": str(row["id"]), "total": float(row["total"] or 0), "items": row["items"] or [],
+        "creadoEn": row["creado_en"].isoformat(),
+        "validadoEn": row["validado_en"].isoformat() if row["validado_en"] else None,
+        "envioTipo": row["envio_tipo"],
+        "destinatarioId": str(row["destinatario_id"]) if row["destinatario_id"] else None,
+        "envioSolicitadoEn": row["envio_solicitado_en"].isoformat() if row["envio_solicitado_en"] else None,
+    } for row in rows]
+
+
+@app.get("/api/cliente/destinatarios")
+def listar_destinatarios_cliente(usuario=Depends(verificar_jwt)):
+    _ensure_pago_tables()
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, nombre_completo, dni, direccion, referencia, provincia, distrito, contacto, predeterminado
+                FROM cliente.destinatario_envio
+                WHERE usuario_id = %s AND activo = true
+                ORDER BY predeterminado DESC, creado_en DESC
+                """,
+                (usuario["sub"],),
+            )
+            rows = cur.fetchall()
+    return [{
+        "id": str(row["id"]), "nombreCompleto": row["nombre_completo"], "dni": row["dni"],
+        "direccion": row["direccion"], "referencia": row["referencia"], "provincia": row["provincia"],
+        "distrito": row["distrito"], "contacto": row["contacto"], "predeterminado": row["predeterminado"],
+    } for row in rows]
+
+
+@app.post("/api/cliente/destinatarios")
+def crear_destinatario_cliente(payload: DestinatarioEnvioPayload, usuario=Depends(verificar_jwt)):
+    _ensure_pago_tables()
+    nombre = payload.nombreCompleto.strip()
+    dni = re.sub(r"\D+", "", payload.dni)
+    direccion = payload.direccion.strip()
+    provincia = payload.provincia.strip()
+    distrito = payload.distrito.strip()
+    contacto = _normalizar_whatsapp(payload.contacto)
+    if not nombre or not direccion or not provincia or not distrito or not 8 <= len(dni) <= 12:
+        raise HTTPException(status_code=400, detail="Completa correctamente los datos del destinatario")
+    destinatario_id = str(uuid4())
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM cliente.destinatario_envio WHERE usuario_id = %s AND activo = true LIMIT 1", (usuario["sub"],))
+            predeterminado = payload.predeterminado or not bool(cur.fetchone())
+            if predeterminado:
+                cur.execute("UPDATE cliente.destinatario_envio SET predeterminado = false WHERE usuario_id = %s", (usuario["sub"],))
+            cur.execute(
+                """
+                INSERT INTO cliente.destinatario_envio (
+                    id, usuario_id, nombre_completo, dni, direccion, referencia, provincia, distrito, contacto, predeterminado
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (destinatario_id, usuario["sub"], nombre, dni, direccion, payload.referencia.strip(), provincia, distrito, contacto, predeterminado),
+            )
+            conn.commit()
+    return {"ok": True, "id": destinatario_id, "predeterminado": predeterminado}
+
+
+@app.post("/api/cliente/almacen/{pago_id}/solicitar-envio")
+def solicitar_envio_almacen(pago_id: str, payload: SolicitudEnvioPayload, usuario=Depends(verificar_jwt)):
+    _ensure_pago_tables()
+    if payload.tipo not in {"contra_entrega", "courrier"}:
+        raise HTTPException(status_code=400, detail="Tipo de envío inválido")
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            destinatario_id = None
+            if payload.tipo == "courrier":
+                if not payload.destinatarioId:
+                    raise HTTPException(status_code=400, detail="Selecciona un destinatario")
+                cur.execute("SELECT id FROM cliente.destinatario_envio WHERE id = %s AND usuario_id = %s AND activo = true", (payload.destinatarioId, usuario["sub"]))
+                destinatario = cur.fetchone()
+                if not destinatario:
+                    raise HTTPException(status_code=404, detail="Destinatario no encontrado")
+                destinatario_id = destinatario["id"]
+            cur.execute(
+                """
+                UPDATE publicacion.solicitud_pago
+                SET envio_tipo = %s, destinatario_id = %s, envio_solicitado_en = now()
+                WHERE id = %s AND usuario_id = %s AND estado = 'validado'
+                RETURNING id, envio_solicitado_en
+                """,
+                (payload.tipo, destinatario_id, pago_id, usuario["sub"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Compra no encontrada")
+            conn.commit()
+    return {"ok": True, "envioTipo": payload.tipo, "envioSolicitadoEn": row["envio_solicitado_en"].isoformat()}
+
+
 @app.get("/api/publico/catalogo")
 def listar_catalogo_publico():
     with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
@@ -374,7 +632,7 @@ def listar_catalogo_publico():
                        i.precio_venta_soles,
                        i.stock_disponible,
                        (
-                           SELECT f.ruta
+                           SELECT COALESCE(NULLIF(f.metadata->>'miniatura_ruta', ''), f.ruta)
                            FROM inventario.publicacion_foto f
                            WHERE f.publicacion_id = p.id
                            ORDER BY COALESCE((f.metadata->>'es_portada')::boolean, false) DESC,
