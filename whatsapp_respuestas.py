@@ -10,12 +10,30 @@ from urllib.request import Request, urlopen
 
 from db_compat import connect, dict_row
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 TEXTOS = {
     "validado": "Hola, tu WhatsApp ha sido validado. Vuelve a Bitstroid para terminar de crear tu cuenta.",
     "invalido": "No pudimos validar tu solicitud. Comprueba que escribes desde el mismo numero indicado en Bitstroid y solicita una nueva validacion; dura 5 minutos.",
     "creado": "Hola, tu cuenta de Bitstroid se creo correctamente.",
 }
+
+
+def diagnostico_db(error):
+    datos = next((arg for arg in error.args if isinstance(arg, dict)), {})
+    codigo = datos.get("C", "")
+    if not isinstance(codigo, str) or not re.fullmatch(r"[0-9A-Z]{5}", codigo):
+        return type(error).__name__
+    causas = {
+        "42P01": "Falta una tabla; aplicar las migraciones SQL en la BD del backend",
+        "42703": "Falta una columna; comprobar la estructura de whatsapp.respuesta_registro",
+        "42702": "Una columna de la consulta es ambigua",
+        "42501": "El usuario de la BD no tiene los permisos necesarios",
+        "28P01": "Credenciales de la BD incorrectas",
+        "3D000": "La base de datos configurada no existe",
+        "53300": "Se alcanzo el limite de conexiones de PostgreSQL",
+        "57014": "PostgreSQL cancelo la consulta por tiempo o interrupcion",
+    }
+    return f"{type(error).__name__} SQLSTATE={codigo}: {causas.get(codigo, 'Error de PostgreSQL')}"
 
 
 @cache
@@ -92,3 +110,4 @@ def despachar(kwargs):
     with connect(**kwargs) as conn:
         with conn.cursor() as cur:
             cur.execute("UPDATE whatsapp.respuesta_registro SET enviado_en = now() WHERE id = %s", (row["id"],))
+    logger.info("Respuesta de registro WhatsApp aceptada por Meta: id=%s tipo=%s", row["id"], row["tipo"])

@@ -83,6 +83,19 @@ class WebhookTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/api/auth/registro/codigo", paths)
         self.assertIn("/api/auth/registro/solicitud", paths)
 
+    def test_numero_peru_con_prefijo_o_local_coincide_con_remitente(self):
+        for numero in ["943875311", "51943875311", "+51943875311", "+51 943 875 311"]:
+            with self.subTest(numero=numero):
+                self.assertEqual(main._normalizar_whatsapp(numero), "51943875311")
+
+    async def test_inicio_advierte_token_ausente_sin_enviar(self):
+        with patch.dict("os.environ", {"WHATSAPP_ACCESS_TOKEN": ""}), patch.object(main, "despachar_respuestas") as enviar:
+            with self.assertLogs("uvicorn.error", level="WARNING") as logs:
+                async with main.lifespan(self.app):
+                    pass
+            self.assertIn("WHATSAPP_ACCESS_TOKEN ausente", " ".join(logs.output))
+            enviar.assert_not_called()
+
     def test_numero_internacional_explicito_no_agrega_peru(self):
         self.assertEqual(main._normalizar_whatsapp("+506 123456"), "506123456")
         self.assertEqual(main._normalizar_whatsapp("+51 943875311"), "51943875311")

@@ -106,6 +106,14 @@ Sin filas ni contactos nuevos, revisar recepcion del webhook. Con filas pendient
 revisar token/permisos y logs de envio. HTTP 200 de Meta significa aceptado,
 no confirma entrega al celular.
 
+En Docker, las variables deben existir dentro del contenedor, no solamente en el
+`.env` usado por Compose para sustituciones. Configurar `env_file` o `environment`
+en el servicio, y recrearlo tras cambiarlas. No publicar el contenido del `.env`.
+Los logs de Uvicorn indican token ausente, POST firmado recibido, validacion
+procesada y envio aceptado/rechazado. Consultar `docker logs --since 10m bitstroid-back`.
+Para Peru, `+51 943875311` se normaliza a `51943875311`; en el campo junto al
+selector +51 solo introducir los nueve digitos nacionales, sin repetir el prefijo.
+
 ## Pruebas aisladas
 
 `python -m unittest test_whatsapp_contactos test_whatsapp_entrada test_whatsapp_webhook test_whatsapp_respuestas test_login_security -v`

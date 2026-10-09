@@ -162,8 +162,9 @@ def procesar_mensajes(kwargs, payload):
     contactos = list(mensajes_entrantes(payload, phone_id))
     mensajes = list(mensajes_registro(payload, phone_id))
     if not contactos:
-        logging.getLogger(__name__).info("Webhook WhatsApp sin mensajes entrantes para el Phone Number ID configurado")
+        logging.getLogger("uvicorn.error").info("Webhook WhatsApp sin mensajes entrantes para el Phone Number ID configurado; puede ser un estado de entrega o un numero distinto")
         return
+    logging.getLogger("uvicorn.error").info("Webhook WhatsApp: %s mensajes entrantes, %s solicitudes REGISTRO", len(contactos), len(mensajes))
     preparar_tabla(tuple(sorted(kwargs.items())))
     with connect(**kwargs, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
@@ -184,7 +185,7 @@ def procesar_mensajes(kwargs, payload):
                         (sender, hash_codigo(sender, palabra, secret), timestamp, timestamp, timestamp))
                     valido = bool(cur.fetchone())
                 encolar(cur, message_id, phone_id, sender, "validado" if valido else "invalido", timestamp=timestamp)
-                logging.getLogger(__name__).info("Solicitud WhatsApp procesada: %s", "validada" if valido else "invalida o vencida")
+                logging.getLogger("uvicorn.error").info("Solicitud WhatsApp procesada: %s", "validada" if valido else "invalida o vencida")
             ids_validos = {m[2] for m in mensajes}
             for contacto in contactos:
                 mensaje = contacto["mensaje"]

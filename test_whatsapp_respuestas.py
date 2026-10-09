@@ -8,6 +8,17 @@ import whatsapp_respuestas as wa
 
 
 class RespuestasTests(unittest.TestCase):
+    def test_diagnostico_sql_no_expone_datos_del_error(self):
+        error = Exception({"C": "42703", "M": "datos privados del servidor", "D": "token privado"})
+        resultado = wa.diagnostico_db(error)
+        self.assertIn("SQLSTATE=42703", resultado)
+        self.assertIn("Falta una columna", resultado)
+        self.assertNotIn("privado", resultado)
+        self.assertNotIn("servidor", resultado)
+
+    def test_diagnostico_sin_sqlstate_no_imprime_mensaje(self):
+        self.assertEqual(wa.diagnostico_db(ValueError("contrasena privada")), "ValueError")
+
     def test_envio_usa_texto_sin_plantilla(self):
         with patch.dict("os.environ", {"WHATSAPP_ACCESS_TOKEN": "privado", "WHATSAPP_API_VERSION": "v21.0"}), patch.object(wa, "urlopen") as abrir:
             abrir.return_value.__enter__.return_value = BytesIO(b'{"messages":[{"id":"wamid.test"}]}')

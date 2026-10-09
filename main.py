@@ -27,19 +27,29 @@ from login_security import LoginGuard, SecurityMiddleware, client_ip
 from starlette.concurrency import run_in_threadpool
 from whatsapp_entrada import (solicitar_validacion, estado_validacion, crear_registro,
     configuracion as configuracion_whatsapp, verificar_firma, verificar_webhook, procesar_mensajes)
-from whatsapp_respuestas import despachar as despachar_respuestas
+from whatsapp_respuestas import despachar as despachar_respuestas, diagnostico_db
 
 JWT_FALLBACK_SECRET = "bitstroid-local-dev-secret-32-bytes-minimo"
 
 @asynccontextmanager
 async def lifespan(app):
+    logger = logging.getLogger("uvicorn.error")
+    if not getenv("WHATSAPP_ACCESS_TOKEN", "").strip():
+        logger.warning("WhatsApp: WHATSAPP_ACCESS_TOKEN ausente; las respuestas automaticas estan desactivadas")
+    else:
+        logger.info("WhatsApp: worker de respuestas automaticas iniciado")
+    try:
+        configuracion_whatsapp()
+    except HTTPException:
+        logger.warning("WhatsApp: configuracion del webhook incompleta; revisar APP_SECRET, VERIFY_TOKEN, OTP_SECRET y PHONE_NUMBER_ID")
     async def respuestas():
         while True:
             if getenv("WHATSAPP_ACCESS_TOKEN", "").strip():
                 try:
                     await run_in_threadpool(despachar_respuestas, _connection_kwargs())
                 except Exception as error:
-                    logging.getLogger(__name__).warning("Cola WhatsApp no disponible: %s", type(error).__name__)
+                    logger.warning("Cola WhatsApp no disponible: %s", diagnostico_db(error))
+                    await asyncio.sleep(28)
             await asyncio.sleep(2)
     task = asyncio.create_task(respuestas())
     try:
@@ -426,11 +436,16 @@ async def recibir_whatsapp(request: Request):
         body = await asyncio.wait_for(leer_body(), timeout=5)
     except TimeoutError:
         raise HTTPException(408, "Tiempo de espera agotado") from None
-    verificar_firma(body, request.headers.get("x-hub-signature-256"), app_secret)
+    try:
+        verificar_firma(body, request.headers.get("x-hub-signature-256"), app_secret)
+    except HTTPException:
+        logging.getLogger("uvicorn.error").warning("Webhook WhatsApp rechazado: firma invalida. Revisar APP_SECRET y cabecera X-Hub-Signature-256 del proxy")
+        raise
     try:
         payload = json.loads(body)
     except (ValueError, UnicodeDecodeError, RecursionError):
         raise HTTPException(400, "Webhook invalido") from None
+    logging.getLogger("uvicorn.error").info("Webhook WhatsApp: POST firmado recibido")
     await run_in_threadpool(procesar_mensajes, _connection_kwargs(), payload)
     return {"ok": True}
 
