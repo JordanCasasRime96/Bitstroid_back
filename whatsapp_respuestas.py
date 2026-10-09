@@ -49,6 +49,10 @@ def preparar_tabla(connection_values):
                 proximo_intento timestamptz NOT NULL DEFAULT now(), intentos integer NOT NULL DEFAULT 0,
                 enviado_en timestamptz, UNIQUE (phone_number_id, evento)
             )""")
+            # CREATE IF NOT EXISTS does not upgrade previously deployed tables.
+            # Unknown timestamps from the old queue must not open a new reply window.
+            cur.execute("ALTER TABLE whatsapp.respuesta_registro ADD COLUMN IF NOT EXISTS recibido_en timestamptz NOT NULL DEFAULT '-infinity'::timestamptz")
+            cur.execute("ALTER TABLE whatsapp.respuesta_registro ALTER COLUMN recibido_en SET DEFAULT now()")
 
 
 def encolar(cur, evento, phone_id, numero, tipo, timestamp=None):

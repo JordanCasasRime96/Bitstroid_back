@@ -8,6 +8,17 @@ import whatsapp_respuestas as wa
 
 
 class RespuestasTests(unittest.TestCase):
+    def test_preparacion_actualiza_tabla_existente_sin_borrar_filas(self):
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+        with patch.object(wa, "connect") as conectar:
+            conectar.return_value.__enter__.return_value = conn
+            wa.preparar_tabla.__wrapped__(())
+        consultas = [call.args[0] for call in cur.execute.call_args_list]
+        self.assertTrue(any("ADD COLUMN IF NOT EXISTS recibido_en" in sql for sql in consultas))
+        self.assertTrue(any("ALTER COLUMN recibido_en SET DEFAULT now()" in sql for sql in consultas))
+        self.assertFalse(any("DROP " in sql or "DELETE " in sql for sql in consultas))
+
     def test_diagnostico_sql_no_expone_datos_del_error(self):
         error = Exception({"C": "42703", "M": "datos privados del servidor", "D": "token privado"})
         resultado = wa.diagnostico_db(error)

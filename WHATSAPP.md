@@ -82,6 +82,11 @@ en el proxy. Mantener reloj sincronizado y limites de trafico/WAF en produccion.
 
 Aplicar `046_whatsapp_respuestas_registro.sql` de
 `Proyeccion de costeo/backend/database/sql` y reconstruir/reiniciar el backend.
+Si ya existia la primera version de la cola, aplicar tambien
+`047_whatsapp_respuestas_recibido_en.sql`: CREATE IF NOT EXISTS no agrega columnas
+a tablas existentes. El backend actualizado tambien aplica esta ampliacion.
+Las filas antiguas sin fecha de mensaje no se reenvian; generar una nueva solicitud
+desde la web despues de corregir la estructura.
 El webhook encola una confirmacion o una respuesta de solicitud invalida/vencida.
 Tras crear realmente el usuario en la web se encola la confirmacion de cuenta.
 El envio sucede despues del commit: un fallo de Meta no invalida el registro.
