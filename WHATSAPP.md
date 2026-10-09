@@ -121,6 +121,13 @@ selector +51 solo introducir los nueve digitos nacionales, sin repetir el prefij
 
 ## Pruebas aisladas
 
+El registro web no exige numero de documento. El backend elimina automaticamente
+la restriccion NOT NULL de `seguridad.usuario.numero_documento` al preparar el
+registro; la migracion equivalente es `048_usuario_documento_opcional.sql`.
+No inventa documentos, ni modifica valores existentes o restricciones de unicidad.
+Prueba local real con rollback y sin mensajes salientes:
+`BITSTROID_TEST_DATABASE=1 python -B -m unittest test_registro_database -v`.
+
 `python -m unittest test_whatsapp_contactos test_whatsapp_entrada test_whatsapp_webhook test_whatsapp_respuestas test_login_security -v`
 Pruebas aisladas: no envian mensajes ni crean clientes reales. La prueba completa
 requiere configurar y desplegar el webhook publico en Meta.

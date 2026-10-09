@@ -69,6 +69,7 @@ def preparar_tabla(connection_values):
     preparar_respuestas(connection_values)
     with connect(**dict(connection_values)) as conn:
         with conn.cursor() as cur:
+            cur.execute("ALTER TABLE seguridad.usuario ALTER COLUMN numero_documento DROP NOT NULL")
             cur.execute("CREATE SCHEMA IF NOT EXISTS cliente")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS cliente.registro_whatsapp_entrada (
