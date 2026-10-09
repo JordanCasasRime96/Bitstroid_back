@@ -50,13 +50,18 @@ class RegistroDatabaseTests(unittest.TestCase):
                                 cur.execute(sql)
             config = ("s" * 48, "app-test", "v" * 48, "1402483696282363", "51926839501")
             with patch.object(wa, "configuracion", return_value=config), patch.object(wa, "preparar_tabla"), patch.object(wa, "connect", return_value=ConexionPrestada()):
-                for _ in range(2):
+                for nombre, perfil, con_correo in [("", "Perfil WhatsApp", False), ("Nombre elegido", "Perfil WhatsApp", True), ("", "", False)]:
                     id_ = str(uuid4())
                     token = "t" * 43
                     numero = "519" + str(int(uuid4().hex[:8], 16) % 100000000).zfill(8)
+                    correo = f"{id_}@example.com" if con_correo else ""
                     datos = {"apodo": "prueba_" + uuid4().hex, "whatsapp": numero,
-                             "nombres": "", "correo": f"{id_}@bitstroid.local", "hash_contrasena": "solo-prueba-rollback"}
+                             "nombres": nombre, "correo": correo, "hash_contrasena": "solo-prueba-rollback"}
                     with conn.cursor() as cur:
+                        if perfil:
+                            cur.execute("""INSERT INTO whatsapp.contacto
+                                (id, numero, nombre_perfil, primer_mensaje_en, ultimo_mensaje_en)
+                                VALUES (%s, %s, %s, now(), now())""", (str(uuid4()), numero, perfil))
                         cur.execute("""INSERT INTO cliente.registro_whatsapp_entrada
                             (id, whatsapp, datos, token_hash, palabra_hash, confirmado)
                             VALUES (%s, %s, %s::jsonb, %s, %s, true)""",
@@ -64,15 +69,25 @@ class RegistroDatabaseTests(unittest.TestCase):
                              wa.hash_codigo(numero, "ABCD2345", config[0])))
                     row = wa.crear_registro(kwargs, id_, token, MagicMock(), "prueba-local")
                     with conn.cursor() as cur:
-                        cur.execute("SELECT numero_documento, nombres, whatsapp_verificado FROM seguridad.usuario WHERE id = %s", (str(row["id"]),))
+                        cur.execute("SELECT numero_documento, nombres, correo, whatsapp_verificado FROM seguridad.usuario WHERE id = %s", (str(row["id"]),))
                         creado = cur.fetchone()
                         self.assertIsNone(creado["numero_documento"])
-                        self.assertIsNone(creado["nombres"])
+                        self.assertEqual(creado["nombres"], nombre or perfil or None)
+                        self.assertEqual(creado["correo"], correo or None)
                         self.assertTrue(creado["whatsapp_verificado"])
                         cur.execute("SELECT 1 FROM cliente.cliente WHERE usuario_id = %s", (str(row["id"]),))
                         self.assertIsNotNone(cur.fetchone())
                         cur.execute("SELECT tipo FROM whatsapp.respuesta_registro WHERE evento = %s", ("cuenta:" + str(row["id"]),))
                         self.assertEqual(cur.fetchone()["tipo"], "creado")
+                        if perfil and not nombre:
+                            # Existing customers from the old registration also get repaired.
+                            cur.execute("UPDATE seguridad.usuario SET nombres = NULL, correo = %s WHERE id = %s",
+                                        (f"{id_}@bitstroid.local", str(row["id"])))
+                        wa.actualizar_datos_clientes(cur)
+                        cur.execute("SELECT nombres, correo FROM seguridad.usuario WHERE id = %s", (str(row["id"]),))
+                        reparado = cur.fetchone()
+                        self.assertEqual(reparado["nombres"], nombre or perfil or None)
+                        self.assertEqual(reparado["correo"], correo or None)
         finally:
             conn.rollback()
             conn._conn.close()

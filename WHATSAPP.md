@@ -125,6 +125,12 @@ El registro web no exige numero de documento. El backend elimina automaticamente
 la restriccion NOT NULL de `seguridad.usuario.numero_documento` al preparar el
 registro; la migracion equivalente es `048_usuario_documento_opcional.sql`.
 No inventa documentos, ni modifica valores existentes o restricciones de unicidad.
+El correo omitido queda NULL en la BD y vacio en la API; no se generan correos
+tecnicos. Si falta el nombre del formulario, se usa el perfil de WhatsApp.
+`049_cliente_nombre_whatsapp_correo_opcional.sql` refleja la actualizacion
+automatica al iniciar el worker: elimina correos UUID internos de clientes
+verificados y completa nombres vacios desde su contacto vinculado. No sobrescribe
+nombres elegidos ni correos reales.
 Prueba local real con rollback y sin mensajes salientes:
 `BITSTROID_TEST_DATABASE=1 python -B -m unittest test_registro_database -v`.
 

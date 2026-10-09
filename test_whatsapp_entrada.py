@@ -77,6 +77,7 @@ class EntradaTests(unittest.TestCase):
         insert = next(c for c in self.cur.execute.call_args_list if "INSERT INTO cliente.registro_whatsapp_entrada" in c.args[0])
         datos = json.loads(insert.args[1][2])
         self.assertNotIn("password", datos)
+        self.assertEqual(datos["correo"], "")
         self.assertTrue(datos["hash_contrasena"].startswith("$2"))
         self.assertEqual(insert.args[1][3], wa.hash_codigo(resultado["verificacionId"], resultado["verificacionToken"], self.secret))
         self.assertEqual(insert.args[1][4], wa.hash_codigo(self.datos["whatsapp"], codigo, self.secret))
@@ -178,6 +179,20 @@ class EntradaTests(unittest.TestCase):
         self.assertIn("INSERT INTO cliente.cliente", sql)
         self.assertIn("DELETE FROM cliente.registro_whatsapp_entrada WHERE id", sql)
         self.assertEqual(self.encolar.call_args.args[-1], "creado")
+        insert = next(c for c in self.cur.execute.call_args_list if "INSERT INTO seguridad.usuario" in c.args[0])
+        self.assertEqual(insert.args[1][4], "")
+        self.assertIn("SELECT NULLIF(btrim(nombre_perfil)", insert.args[0])
+
+    def test_correo_proporcionado_se_conserva(self):
+        solicitud = self.solicitud()
+        solicitud["datos"]["correo"] = "cliente@example.com"
+        solicitud["datos"]["nombres"] = "Nombre elegido"
+        self.cur.fetchone.side_effect = [solicitud, solicitud,
+            {"usuario": False, "numero": False, "correo": False}, {"id": "cliente"}]
+        wa.crear_registro({}, self.id, self.token, self.guard, "ip")
+        insert = next(c for c in self.cur.execute.call_args_list if "INSERT INTO seguridad.usuario" in c.args[0])
+        self.assertEqual(insert.args[1][2], "Nombre elegido")
+        self.assertEqual(insert.args[1][4], "cliente@example.com")
 
 
 if __name__ == "__main__":

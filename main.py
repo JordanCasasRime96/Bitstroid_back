@@ -26,7 +26,8 @@ from perfil_foto import comprimir_foto, guardar_foto, obtener_foto
 from login_security import LoginGuard, SecurityMiddleware, client_ip
 from starlette.concurrency import run_in_threadpool
 from whatsapp_entrada import (solicitar_validacion, estado_validacion, crear_registro,
-    configuracion as configuracion_whatsapp, verificar_firma, verificar_webhook, procesar_mensajes)
+    configuracion as configuracion_whatsapp, verificar_firma, verificar_webhook, procesar_mensajes,
+    preparar_tabla as preparar_registro_whatsapp)
 from whatsapp_respuestas import despachar as despachar_respuestas, diagnostico_db
 
 JWT_FALLBACK_SECRET = "bitstroid-local-dev-secret-32-bytes-minimo"
@@ -43,9 +44,13 @@ async def lifespan(app):
     except HTTPException:
         logger.warning("WhatsApp: configuracion del webhook incompleta; revisar APP_SECRET, VERIFY_TOKEN, OTP_SECRET y PHONE_NUMBER_ID")
     async def respuestas():
+        preparado = False
         while True:
             if getenv("WHATSAPP_ACCESS_TOKEN", "").strip():
                 try:
+                    if not preparado:
+                        await run_in_threadpool(preparar_registro_whatsapp, tuple(sorted(_connection_kwargs().items())))
+                        preparado = True
                     await run_in_threadpool(despachar_respuestas, _connection_kwargs())
                 except Exception as error:
                     logger.warning("Cola WhatsApp no disponible: %s", diagnostico_db(error))

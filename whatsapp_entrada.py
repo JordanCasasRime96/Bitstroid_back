@@ -27,8 +27,8 @@ def comprobar_duplicados(cur, datos):
     cur.execute("""
         SELECT EXISTS(SELECT 1 FROM seguridad.usuario WHERE lower(apodo::text) = lower(%s)) AS usuario,
                EXISTS(SELECT 1 FROM seguridad.usuario WHERE whatsapp = %s) AS numero,
-               EXISTS(SELECT 1 FROM seguridad.usuario WHERE lower(correo::text) = lower(%s)) AS correo
-    """, (datos["apodo"], datos["whatsapp"], datos["correo"]))
+               EXISTS(SELECT 1 FROM seguridad.usuario WHERE lower(correo::text) = lower(NULLIF(%s, ''))) AS correo
+    """, (datos["apodo"], datos["whatsapp"], datos.get("correo") or ""))
     existe = cur.fetchone()
     if existe["usuario"]:
         raise HTTPException(409, "El nombre de usuario ya esta registrado")
@@ -70,6 +70,7 @@ def preparar_tabla(connection_values):
     with connect(**dict(connection_values)) as conn:
         with conn.cursor() as cur:
             cur.execute("ALTER TABLE seguridad.usuario ALTER COLUMN numero_documento DROP NOT NULL")
+            cur.execute("ALTER TABLE seguridad.usuario ALTER COLUMN correo DROP NOT NULL")
             cur.execute("CREATE SCHEMA IF NOT EXISTS cliente")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS cliente.registro_whatsapp_entrada (
@@ -81,6 +82,19 @@ def preparar_tabla(connection_values):
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS registro_entrada_numero_idx ON cliente.registro_whatsapp_entrada(whatsapp)")
+            actualizar_datos_clientes(cur)
+
+
+def actualizar_datos_clientes(cur):
+    cur.execute("""UPDATE seguridad.usuario u SET correo = NULL
+        WHERE u.whatsapp_verificado = true
+        AND u.correo::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@bitstroid[.]local$'
+        AND EXISTS (SELECT 1 FROM cliente.cliente c WHERE c.usuario_id = u.id)""")
+    cur.execute("""UPDATE seguridad.usuario u SET nombres = btrim(c.nombre_perfil)
+        FROM whatsapp.contacto c WHERE c.usuario_id = u.id AND c.numero = u.whatsapp
+        AND u.whatsapp_verificado = true AND NULLIF(btrim(u.nombres), '') IS NULL
+        AND NULLIF(btrim(c.nombre_perfil), '') IS NOT NULL
+        AND EXISTS (SELECT 1 FROM cliente.cliente cl WHERE cl.usuario_id = u.id)""")
 
 
 def solicitar_validacion(kwargs, datos, guard, ip):
@@ -96,8 +110,6 @@ def solicitar_validacion(kwargs, datos, guard, ip):
     palabra = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(8))
     datos = {**datos, "hash_contrasena": bcrypt.hashpw(datos["password"].encode(), bcrypt.gensalt()).decode()}
     del datos["password"]
-    if not datos["correo"]:
-        datos["correo"] = f"{id_}@bitstroid.local"
     with connect(**kwargs, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM cliente.registro_whatsapp_entrada WHERE vence_en < now()")
@@ -227,16 +239,21 @@ def crear_registro(kwargs, id_, token, guard, ip):
                 solicitud = comprobar_solicitud(cur, id_, token, secret, bloquear=True)
                 if not solicitud["confirmado"]:
                     raise HTTPException(409, "Tu WhatsApp aun no esta validado")
-                datos = solicitud["datos"]
+                datos = dict(solicitud["datos"])
+                correo = (datos.get("correo") or "").strip()
+                datos["correo"] = "" if correo.lower().endswith("@bitstroid.local") else correo
                 cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("registro-usuario:" + datos["apodo"].lower(),))
-                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("registro-correo:" + datos["correo"].lower(),))
+                if datos["correo"]:
+                    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("registro-correo:" + datos["correo"].lower(),))
                 comprobar_duplicados(cur, datos)
                 usuario_id = str(uuid4())
                 cur.execute("""INSERT INTO seguridad.usuario (id, apodo, nombres, correo, whatsapp, hash_contrasena,
                     forzar_cambio_contrasena, correo_verificado, whatsapp_verificado, estado)
-                    VALUES (%s, %s, NULLIF(%s, ''), %s, %s, %s, false, false, true, 'activo')
+                    VALUES (%s, %s, COALESCE(NULLIF(%s, ''),
+                        (SELECT NULLIF(btrim(nombre_perfil), '') FROM whatsapp.contacto WHERE numero = %s)),
+                        NULLIF(%s, ''), %s, %s, false, false, true, 'activo')
                     RETURNING id, apodo, nombres, correo, whatsapp""",
-                    (usuario_id, datos["apodo"], datos["nombres"], datos["correo"], datos["whatsapp"], datos["hash_contrasena"]))
+                    (usuario_id, datos["apodo"], datos["nombres"], datos["whatsapp"], datos["correo"], datos["whatsapp"], datos["hash_contrasena"]))
                 row = cur.fetchone()
                 cur.execute("INSERT INTO seguridad.categoria_rol (usuario_id, rol, activo) VALUES (%s, 'cliente', true) ON CONFLICT DO NOTHING", (usuario_id,))
                 cur.execute("INSERT INTO cliente.cliente (usuario_id, puntos, activo, creado_por_usuario_id) VALUES (%s, 0, true, %s) ON CONFLICT (usuario_id) DO NOTHING", (usuario_id, usuario_id))
