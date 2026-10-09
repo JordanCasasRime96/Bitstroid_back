@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from contextlib import asynccontextmanager, suppress
+import logging
 from os import getenv
 from pathlib import Path
 import asyncio
@@ -25,10 +27,30 @@ from login_security import LoginGuard, SecurityMiddleware, client_ip
 from starlette.concurrency import run_in_threadpool
 from whatsapp_entrada import (solicitar_validacion, estado_validacion, crear_registro,
     configuracion as configuracion_whatsapp, verificar_firma, verificar_webhook, procesar_mensajes)
+from whatsapp_respuestas import despachar as despachar_respuestas
 
 JWT_FALLBACK_SECRET = "bitstroid-local-dev-secret-32-bytes-minimo"
 
-app = FastAPI(title="Bitstroid API", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def lifespan(app):
+    async def respuestas():
+        while True:
+            if getenv("WHATSAPP_ACCESS_TOKEN", "").strip():
+                try:
+                    await run_in_threadpool(despachar_respuestas, _connection_kwargs())
+                except Exception as error:
+                    logging.getLogger(__name__).warning("Cola WhatsApp no disponible: %s", type(error).__name__)
+            await asyncio.sleep(2)
+    task = asyncio.create_task(respuestas())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(title="Bitstroid API", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 settings = get_settings()
 login_guard = LoginGuard(getenv("RATE_LIMIT_STORAGE_URL", "memory://"))
 app.add_middleware(SecurityMiddleware, guard=login_guard)

@@ -6,6 +6,7 @@ from os import getenv
 import re
 import secrets
 import json
+import logging
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -14,8 +15,27 @@ from fastapi import HTTPException
 from limits import RateLimitItemPerHour, RateLimitItemPerMinute
 
 from db_compat import connect, dict_row
-from whatsapp_registro import comprobar_duplicados, hash_codigo
 from whatsapp_contactos import preparar_tablas, mensajes_entrantes, guardar_contactos, vincular_usuario
+from whatsapp_respuestas import preparar_tabla as preparar_respuestas, encolar
+
+
+def hash_codigo(id_, codigo, secret):
+    return hmac.new(secret.encode(), f"{id_}:{codigo}".encode(), sha256).hexdigest()
+
+
+def comprobar_duplicados(cur, datos):
+    cur.execute("""
+        SELECT EXISTS(SELECT 1 FROM seguridad.usuario WHERE lower(apodo::text) = lower(%s)) AS usuario,
+               EXISTS(SELECT 1 FROM seguridad.usuario WHERE whatsapp = %s) AS numero,
+               EXISTS(SELECT 1 FROM seguridad.usuario WHERE lower(correo::text) = lower(%s)) AS correo
+    """, (datos["apodo"], datos["whatsapp"], datos["correo"]))
+    existe = cur.fetchone()
+    if existe["usuario"]:
+        raise HTTPException(409, "El nombre de usuario ya esta registrado")
+    if existe["numero"]:
+        raise HTTPException(409, "Este WhatsApp ya esta registrado")
+    if existe["correo"]:
+        raise HTTPException(409, "Este correo ya esta registrado")
 
 
 def configuracion():
@@ -46,6 +66,7 @@ def verificar_webhook(mode, token, challenge):
 @cache
 def preparar_tabla(connection_values):
     preparar_tablas(connection_values)
+    preparar_respuestas(connection_values)
     with connect(**dict(connection_values)) as conn:
         with conn.cursor() as cur:
             cur.execute("CREATE SCHEMA IF NOT EXISTS cliente")
@@ -141,6 +162,7 @@ def procesar_mensajes(kwargs, payload):
     contactos = list(mensajes_entrantes(payload, phone_id))
     mensajes = list(mensajes_registro(payload, phone_id))
     if not contactos:
+        logging.getLogger(__name__).info("Webhook WhatsApp sin mensajes entrantes para el Phone Number ID configurado")
         return
     preparar_tabla(tuple(sorted(kwargs.items())))
     with connect(**kwargs, row_factory=dict_row) as conn:
@@ -151,8 +173,25 @@ def procesar_mensajes(kwargs, payload):
                 cur.execute("""UPDATE cliente.registro_whatsapp_entrada SET confirmado = true, mensaje_id = %s
                     WHERE whatsapp = %s AND palabra_hash = %s AND confirmado = false
                     AND vence_en > now() AND to_timestamp(%s) >= date_trunc('second', creado_en)
-                    AND to_timestamp(%s) <= now() AND to_timestamp(%s) < vence_en""",
+                    AND to_timestamp(%s) <= now() AND to_timestamp(%s) < vence_en RETURNING id""",
                     (message_id, sender, hash_codigo(sender, palabra, secret), timestamp, timestamp, timestamp))
+                valido = bool(cur.fetchone())
+                if not valido:
+                    cur.execute("""SELECT id FROM cliente.registro_whatsapp_entrada
+                        WHERE whatsapp = %s AND palabra_hash = %s AND confirmado = true
+                        AND vence_en > now() AND to_timestamp(%s) >= date_trunc('second', creado_en)
+                        AND to_timestamp(%s) <= now() AND to_timestamp(%s) < vence_en""",
+                        (sender, hash_codigo(sender, palabra, secret), timestamp, timestamp, timestamp))
+                    valido = bool(cur.fetchone())
+                encolar(cur, message_id, phone_id, sender, "validado" if valido else "invalido", timestamp=timestamp)
+                logging.getLogger(__name__).info("Solicitud WhatsApp procesada: %s", "validada" if valido else "invalida o vencida")
+            ids_validos = {m[2] for m in mensajes}
+            for contacto in contactos:
+                mensaje = contacto["mensaje"]
+                contenido = mensaje.get("text")
+                texto = contenido.get("body", "") if contacto["tipo"] == "text" and isinstance(contenido, dict) else ""
+                if isinstance(texto, str) and re.search(r"(?:^|\n)REGISTRO\b", texto) and contacto["mensaje_id"] not in ids_validos:
+                    encolar(cur, contacto["mensaje_id"], phone_id, contacto["numero"], "invalido", timestamp=contacto["timestamp"])
 
 
 def comprobar_solicitud(cur, id_, token, secret, bloquear=False):
@@ -200,5 +239,6 @@ def crear_registro(kwargs, id_, token, guard, ip):
                 cur.execute("INSERT INTO seguridad.categoria_rol (usuario_id, rol, activo) VALUES (%s, 'cliente', true) ON CONFLICT DO NOTHING", (usuario_id,))
                 cur.execute("INSERT INTO cliente.cliente (usuario_id, puntos, activo, creado_por_usuario_id) VALUES (%s, 0, true, %s) ON CONFLICT (usuario_id) DO NOTHING", (usuario_id, usuario_id))
                 vincular_usuario(cur, datos["whatsapp"], usuario_id)
+                encolar(cur, "cuenta:" + usuario_id, configuracion()[3], datos["whatsapp"], "creado")
                 cur.execute("DELETE FROM cliente.registro_whatsapp_entrada WHERE id = %s", (id_,))
     return row

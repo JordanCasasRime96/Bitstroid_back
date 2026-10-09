@@ -13,7 +13,7 @@ class SqlMigrationsTests(unittest.TestCase):
         self.assertTrue(scripts)
         sql = " ".join(" ".join(path.read_text(encoding="utf-8").split()) for path in scripts)
         statements = 0
-        for name in ["main.py", "perfil_foto.py", "whatsapp_registro.py", "whatsapp_entrada.py", "whatsapp_contactos.py"]:
+        for name in ["main.py", "perfil_foto.py", "whatsapp_entrada.py", "whatsapp_contactos.py", "whatsapp_respuestas.py"]:
             tree = ast.parse((base / name).read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "execute" or not node.args:

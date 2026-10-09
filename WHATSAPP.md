@@ -6,7 +6,7 @@ saliente exitosa no configura por si sola la recepcion del webhook.
 
 ## Variables del servidor
 
-Agregar las variables de `.env.example` al entorno privado:
+Agregar las siguientes variables al entorno privado:
 
 - `WHATSAPP_PHONE_NUMBER_ID=1402483696282363`: ID probado en Make.
 - `WHATSAPP_BUSINESS_NUMBER=51926839501`: destino del enlace wa.me.
@@ -25,7 +25,8 @@ Generar cada secreto propio por separado:
 `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 No publicar secretos ni versionar `.env`. Reiniciar tras configurar.
 No hacen falta `WHATSAPP_AUTH_TEMPLATE` ni `WHATSAPP_AUTH_LANGUAGE`.
-Token de acceso/version de API solo se necesitan para envios salientes.
+Para las respuestas automaticas tambien son necesarios `WHATSAPP_ACCESS_TOKEN`
+y `WHATSAPP_API_VERSION=v21.0`, correspondientes a la misma aplicacion/cuenta.
 No hay nuevas dependencias: instalar `pip install -r requirements.txt`.
 
 ## Meta y dominio
@@ -72,15 +73,42 @@ La firma acredita el numero de WhatsApp remitente, no el dispositivo fisico:
 tambien pueden enviar mensajes sus dispositivos vinculados. La finalizacion
 solo acepta el token privado del navegador que inicio la solicitud.
 Nueva solicitud invalida la anterior; espera 60 segundos, limites por IP/numero/global.
-Se crea idempotentemente `cliente.registro_whatsapp_entrada`. Las solicitudes del
-viejo OTP no sirven. `/api/auth/registro/codigo` ya no esta expuesta.
+Se crea idempotentemente `cliente.registro_whatsapp_entrada`.
 
 No registrar cuerpos, Authorization, contrasenas ni query strings del handshake
 en el proxy. Mantener reloj sincronizado y limites de trafico/WAF en produccion.
 
-## Pruebas
+## Respuestas automaticas y diagnostico
 
-`python -m unittest test_whatsapp_contactos test_whatsapp_entrada test_whatsapp_webhook test_whatsapp_registro test_login_security -v`
+Aplicar `046_whatsapp_respuestas_registro.sql` de
+`Proyeccion de costeo/backend/database/sql` y reconstruir/reiniciar el backend.
+El webhook encola una confirmacion o una respuesta de solicitud invalida/vencida.
+Tras crear realmente el usuario en la web se encola la confirmacion de cuenta.
+El envio sucede despues del commit: un fallo de Meta no invalida el registro.
+El worker del backend revisa la cola cada 2 segundos, reintenta hasta 5 veces
+con 60 segundos de espera y no envia solicitudes de mas de 23 horas.
+No requiere plantilla ni nuevas dependencias. Mantener activo el lifespan de Uvicorn.
+Los reintentos del webhook no generan nuevas filas para el mismo mensaje.
+Una interrupcion tras enviar a Meta pero antes de guardar el resultado podria
+repetir una respuesta; la validacion y creacion de cuenta siguen siendo unicas.
+
+Si no hay respuesta, revisar en Meta la suscripcion `messages` de TU aplicacion
+y su suscripcion a la cuenta WhatsApp Business, no solo la conexion de Make.
+Comprobar llegada del POST y errores de firma (401) en los logs del servidor.
+Los errores de envio muestran solo ID interno y codigo HTTP/Meta, nunca tokens.
+
+```sql
+SELECT id, tipo, intentos, creado_en, enviado_en
+FROM whatsapp.respuesta_registro ORDER BY id DESC LIMIT 20;
+```
+
+Sin filas ni contactos nuevos, revisar recepcion del webhook. Con filas pendientes,
+revisar token/permisos y logs de envio. HTTP 200 de Meta significa aceptado,
+no confirma entrega al celular.
+
+## Pruebas aisladas
+
+`python -m unittest test_whatsapp_contactos test_whatsapp_entrada test_whatsapp_webhook test_whatsapp_respuestas test_login_security -v`
 Pruebas aisladas: no envian mensajes ni crean clientes reales. La prueba completa
 requiere configurar y desplegar el webhook publico en Meta.
 
@@ -89,7 +117,6 @@ requiere configurar y desplegar el webhook publico en Meta.
 Para desplegar la estructura en otro servidor, ejecutar
 `042_whatsapp_contactos.sql` y `043_registro_whatsapp_entrada.sql` de
 `Proyeccion de costeo/backend/database/sql`.
-Ver `README_bitstroid.md` en esa carpeta para requisitos y comandos.
 
 Cada mensaje entrante firmado, destinado al Phone Number ID configurado, registra
 un contacto en `whatsapp.contacto`: numero unico, nombre de perfil si se dispone,

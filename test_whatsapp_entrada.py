@@ -25,6 +25,9 @@ class EntradaTests(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.guard = MagicMock()
+        p = patch.object(wa, "encolar")
+        self.encolar = p.start()
+        self.addCleanup(p.stop)
         self.id = "00000000-0000-0000-0000-000000000001"
         self.token = "t" * 43
         self.palabra = "ABCD2345"
@@ -116,6 +119,25 @@ class EntradaTests(unittest.TestCase):
         self.assertNotEqual(wa.hash_codigo("51943875311", self.palabra, self.secret),
             wa.hash_codigo("51999999999", self.palabra, self.secret))
 
+    def test_responde_validado_sin_afirmar_cuenta_creada(self):
+        with patch.object(wa, "guardar_contactos"):
+            self.cur.fetchone.return_value = {"id": self.id}
+            wa.procesar_mensajes({}, self.payload())
+        self.assertEqual(self.encolar.call_args.args[-1], "validado")
+
+    def test_responde_solicitud_invalida(self):
+        with patch.object(wa, "guardar_contactos"):
+            self.cur.fetchone.return_value = None
+            wa.procesar_mensajes({}, self.payload(sender="51999999999"))
+        self.assertEqual(self.encolar.call_args.args[-1], "invalido")
+
+    def test_responde_formato_incorrecto(self):
+        payload = self.payload()
+        payload["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"] = "REGISTRO: ABC"
+        with patch.object(wa, "guardar_contactos"):
+            wa.procesar_mensajes({}, payload)
+        self.assertEqual(self.encolar.call_args.args[-1], "invalido")
+
     def test_formato_antiguo_o_codigo_corto_no_valida(self):
         for text in [f"REGISTRO: {self.id} {self.palabra}", "REGISTRO: ABCD234", "REGISTRO: ABCD23456"]:
             payload = self.payload()
@@ -155,6 +177,7 @@ class EntradaTests(unittest.TestCase):
         self.assertIn("false, false, true, 'activo'", sql)
         self.assertIn("INSERT INTO cliente.cliente", sql)
         self.assertIn("DELETE FROM cliente.registro_whatsapp_entrada WHERE id", sql)
+        self.assertEqual(self.encolar.call_args.args[-1], "creado")
 
 
 if __name__ == "__main__":
