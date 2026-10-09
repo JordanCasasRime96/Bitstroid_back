@@ -6,12 +6,12 @@ import base64
 import binascii
 import json
 import re
-from typing import Any
-from uuid import uuid4
+from typing import Any, Literal
+from uuid import UUID, uuid4
 
 import bcrypt
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,11 +19,19 @@ from pydantic import BaseModel, Field
 
 from config import get_settings
 from db_compat import dict_row, connect
+from catalogo_publico import pagina_catalogo, detalle_items
+from perfil_foto import comprimir_foto, guardar_foto, obtener_foto
+from login_security import LoginGuard, SecurityMiddleware, client_ip
+from starlette.concurrency import run_in_threadpool
+from whatsapp_entrada import (solicitar_validacion, estado_validacion, crear_registro,
+    configuracion as configuracion_whatsapp, verificar_firma, verificar_webhook, procesar_mensajes)
 
 JWT_FALLBACK_SECRET = "bitstroid-local-dev-secret-32-bytes-minimo"
 
 app = FastAPI(title="Bitstroid API", docs_url=None, redoc_url=None, openapi_url=None)
 settings = get_settings()
+login_guard = LoginGuard(getenv("RATE_LIMIT_STORAGE_URL", "memory://"))
+app.add_middleware(SecurityMiddleware, guard=login_guard)
 
 cors_origins = [
     origin.strip()
@@ -39,6 +47,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 
 
@@ -55,16 +64,34 @@ app.mount("/uploads", StaticFiles(directory=str(image_storage_dir)), name="uploa
 
 
 class LoginPayload(BaseModel):
-    credencial: str
-    password: str
+    credencial: str = Field(max_length=254)
+    password: str = Field(max_length=120)
 
 
 class RegistroPayload(BaseModel):
-    apodo: str
-    whatsapp: str
-    password: str = Field(min_length=6, max_length=120)
-    nombres: str = ""
-    correo: str = ""
+    apodo: str = Field(min_length=1, max_length=60)
+    whatsapp: str = Field(min_length=1, max_length=25)
+    password: str = Field(min_length=1, max_length=120)
+    nombres: str = Field(default="", max_length=160)
+    correo: str = Field(default="", max_length=254)
+
+
+class VerificarRegistroPayload(BaseModel):
+    verificacionId: UUID
+    verificacionToken: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+
+
+class CambiarContrasenaPayload(BaseModel):
+    contrasena_actual: str
+    contrasena_nueva: str = Field(min_length=1, max_length=120)
+
+
+class EstablecerContrasenaPayload(BaseModel):
+    contrasena_nueva: str = Field(min_length=1, max_length=120)
+
+
+class FotoPerfilPayload(BaseModel):
+    contenidoBase64: str = Field(min_length=1, max_length=350000)
 
 
 class InteraccionPublicacionPayload(BaseModel):
@@ -99,6 +126,12 @@ class DestinatarioEnvioPayload(BaseModel):
     predeterminado: bool = False
 
 
+class SolicitudCarritoPayload(BaseModel):
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    invitadoNombre: str = ""
+    invitadoWhatsapp: str = ""
+
+
 def _connection_kwargs() -> dict[str, Any]:
     db = settings.database
     return {
@@ -113,7 +146,7 @@ def _connection_kwargs() -> dict[str, Any]:
 
 def _normalizar_whatsapp(valor: str) -> str:
     digitos = re.sub(r"\D+", "", valor or "")
-    if len(digitos) == 9:
+    if len(digitos) == 9 and not (valor or "").strip().startswith("+"):
         digitos = f"51{digitos}"
     if not re.match(r"^[0-9]{8,15}$", digitos):
         raise HTTPException(status_code=400, detail="WhatsApp invalido")
@@ -142,9 +175,11 @@ def _usuario_response(row: dict[str, Any]) -> dict[str, Any]:
         "id": str(row["id"]),
         "apodo": row["apodo"] or "",
         "nombres": row["nombres"] or "",
-        "correo": row["correo"] or "",
+        "correo": "" if str(row["correo"] or "").endswith("@bitstroid.local") else row["correo"] or "",
         "whatsapp": row["whatsapp"] or "",
+        "fotoUrl": obtener_foto(_connection_kwargs(), str(row["id"])),
         "rol": "cliente",
+        "requiereCambioContrasena": bool(row.get("forzar_cambio_contrasena", False)),
         "accessToken": _crear_token(row),
     }
 
@@ -228,7 +263,7 @@ def _ensure_pago_tables() -> None:
                     envio_solicitado_en timestamptz,
                     creado_en timestamptz NOT NULL DEFAULT now()
                 )
-                """
+"""
             )
             cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS invitado_nombre varchar(160) NOT NULL DEFAULT ''")
             cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS invitado_whatsapp varchar(30) NOT NULL DEFAULT ''")
@@ -256,6 +291,22 @@ def _ensure_pago_tables() -> None:
                 """
             )
             cur.execute("ALTER TABLE publicacion.solicitud_pago ADD COLUMN IF NOT EXISTS destinatario_id uuid REFERENCES cliente.destinatario_envio(id) ON DELETE SET NULL")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS publicacion.solicitud_carrito (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    usuario_id uuid REFERENCES seguridad.usuario(id) ON DELETE SET NULL,
+                    invitado_nombre text NOT NULL DEFAULT '',
+                    invitado_whatsapp text NOT NULL DEFAULT '',
+                    items jsonb NOT NULL DEFAULT '[]'::jsonb,
+                    total_pen numeric(14, 2) NOT NULL DEFAULT 0,
+                    total_usd numeric(14, 2) NOT NULL DEFAULT 0,
+                    creado_en timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS solicitud_carrito_creado_en_idx ON publicacion.solicitud_carrito(creado_en DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS solicitud_carrito_usuario_idx ON publicacion.solicitud_carrito(usuario_id, creado_en DESC)")
             conn.commit()
 
 
@@ -265,17 +316,20 @@ def root():
 
 
 @app.post("/api/auth/login")
-def login(payload: LoginPayload):
+def login(payload: LoginPayload, request: Request):
     credencial = payload.credencial.strip()
     password = payload.password.strip()
+    ip = client_ip(request.scope)
     if not credencial or not password:
+        login_guard.failed(ip)
         raise HTTPException(status_code=401, detail="Completa tus credenciales")
 
     with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT u.id, u.apodo, u.nombres, u.correo, u.whatsapp, u.hash_contrasena
+                SELECT u.id, u.apodo, u.nombres, u.correo, u.whatsapp, u.hash_contrasena,
+                       u.forzar_cambio_contrasena
                 FROM seguridad.usuario u
                 WHERE (lower(u.correo::text) = lower(%s)
                        OR lower(u.apodo::text) = lower(%s)
@@ -287,78 +341,76 @@ def login(payload: LoginPayload):
             )
             row = cur.fetchone()
     if not row:
+        login_guard.failed(ip)
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
     hash_contrasena = str(row["hash_contrasena"] or "").strip()
-    if not bcrypt.checkpw(password.encode("utf-8"), hash_contrasena.encode("utf-8")):
+    if len(password.encode("utf-8")) > 72 or not bcrypt.checkpw(password.encode("utf-8"), hash_contrasena.encode("utf-8")):
+        login_guard.failed(ip)
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+    login_guard.succeeded(ip)
     return _usuario_response(row)
 
 
-@app.post("/api/auth/registro")
-def registrar(payload: RegistroPayload):
+@app.post("/api/auth/registro/solicitud")
+def solicitud_registro(payload: RegistroPayload, request: Request, response: Response):
+    response.headers["Cache-Control"] = "no-store"
     apodo = payload.apodo.strip()
     nombres = payload.nombres.strip()
     whatsapp = _normalizar_whatsapp(payload.whatsapp)
     correo = payload.correo.strip()
-    if not apodo or not whatsapp:
-        raise HTTPException(status_code=400, detail="Apodo y WhatsApp son obligatorios")
-    if not correo:
-        correo = f"{re.sub(r'[^a-zA-Z0-9._-]+', '_', apodo).lower()}@bitstroid.local"
-    if not _email_valido(correo):
+    if not apodo or not whatsapp or not payload.password.strip():
+        raise HTTPException(status_code=400, detail="Usuario, WhatsApp y contraseña son obligatorios")
+    if correo and not _email_valido(correo):
         raise HTTPException(status_code=400, detail="Correo invalido")
+    return solicitar_validacion(_connection_kwargs(), {"apodo": apodo, "whatsapp": whatsapp,
+        "password": payload.password.strip(), "nombres": nombres, "correo": correo}, login_guard, client_ip(request.scope))
 
-    hash_contrasena = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    usuario_id = str(uuid4())
-    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
-        with conn.transaction():
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        EXISTS (SELECT 1 FROM seguridad.usuario WHERE lower(apodo::text) = lower(%s)) AS apodo_existe,
-                        EXISTS (SELECT 1 FROM seguridad.usuario WHERE whatsapp = %s) AS whatsapp_existe,
-                        EXISTS (SELECT 1 FROM seguridad.usuario WHERE lower(correo::text) = lower(%s)) AS correo_existe
-                    """,
-                    (apodo, whatsapp, correo),
-                )
-                existe = cur.fetchone()
-                if existe["apodo_existe"]:
-                    raise HTTPException(status_code=409, detail="El apodo ya existe")
-                if existe["whatsapp_existe"]:
-                    raise HTTPException(status_code=409, detail="El WhatsApp ya existe")
-                if existe["correo_existe"]:
-                    raise HTTPException(status_code=409, detail="El correo ya existe")
-                cur.execute(
-                    """
-                    INSERT INTO seguridad.usuario (
-                        id, apodo, nombres, correo, whatsapp, hash_contrasena,
-                        forzar_cambio_contrasena, correo_verificado, whatsapp_verificado, estado
-                    )
-                    VALUES (%s, %s, NULLIF(%s, ''), %s, %s, %s, false, false, false, 'activo')
-                    RETURNING id, apodo, nombres, correo, whatsapp
-                    """,
-                    (usuario_id, apodo, nombres, correo, whatsapp, hash_contrasena),
-                )
-                row = cur.fetchone()
-                cur.execute(
-                    """
-                    INSERT INTO seguridad.categoria_rol (usuario_id, rol, activo)
-                    VALUES (%s, 'cliente', true)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    (usuario_id,),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO cliente.cliente (usuario_id, puntos, activo, creado_por_usuario_id)
-                    VALUES (%s, 0, true, %s)
-                    ON CONFLICT (usuario_id) DO UPDATE
-                    SET activo = true,
-                        actualizado_en = now()
-                    """,
-                    (usuario_id, usuario_id),
-                )
+
+@app.get("/api/auth/registro/estado/{verificacion_id}")
+def estado_registro(verificacion_id: UUID, request: Request, response: Response,
+                    authorization: str = Header(default="", max_length=128)):
+    match = re.fullmatch(r"Bearer ([A-Za-z0-9_-]{43})", authorization)
+    if not match:
+        raise HTTPException(401, "Solicitud no autorizada")
+    response.headers["Cache-Control"] = "no-store"
+    return estado_validacion(_connection_kwargs(), str(verificacion_id), match[1], login_guard, client_ip(request.scope))
+
+
+@app.post("/api/auth/registro")
+def registrar(payload: VerificarRegistroPayload, request: Request):
+    row = crear_registro(_connection_kwargs(), str(payload.verificacionId), payload.verificacionToken,
+                             login_guard, client_ip(request.scope))
     return _usuario_response(row)
+
+
+@app.get("/api/webhooks/whatsapp")
+def confirmar_webhook(request: Request):
+    params = request.query_params
+    challenge = verificar_webhook(params.get("hub.mode"), params.get("hub.verify_token"), params.get("hub.challenge"))
+    return Response(content=challenge, media_type="text/plain", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/webhooks/whatsapp")
+async def recibir_whatsapp(request: Request):
+    app_secret = configuracion_whatsapp()[1]
+    async def leer_body():
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > 65536:
+                raise HTTPException(413, "Webhook demasiado grande")
+            body.extend(chunk)
+        return bytes(body)
+    try:
+        body = await asyncio.wait_for(leer_body(), timeout=5)
+    except TimeoutError:
+        raise HTTPException(408, "Tiempo de espera agotado") from None
+    verificar_firma(body, request.headers.get("x-hub-signature-256"), app_secret)
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        raise HTTPException(400, "Webhook invalido") from None
+    await run_in_threadpool(procesar_mensajes, _connection_kwargs(), payload)
+    return {"ok": True}
 
 
 @app.get("/api/auth/me")
@@ -367,18 +419,99 @@ def me(usuario=Depends(verificar_jwt)):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT u.id, u.apodo, u.nombres, u.correo, u.whatsapp, '' AS hash_contrasena
+                SELECT u.id, u.apodo, u.nombres, u.correo, u.whatsapp, '' AS hash_contrasena,
+                       u.forzar_cambio_contrasena
                 FROM seguridad.usuario u
                 WHERE u.id = %s
                   AND u.estado = 'activo'
                 LIMIT 1
                 """,
-                (usuario["sub"],),
-            )
+(usuario["sub"],),
+                )
             row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=401, detail="Usuario no encontrado")
     return {k: v for k, v in _usuario_response(row).items() if k != "accessToken"}
+
+
+@app.post("/api/auth/cambiar-contrasena")
+def cambiar_contrasena(payload: CambiarContrasenaPayload, usuario=Depends(verificar_jwt)):
+    contrasena_actual = payload.contrasena_actual.strip()
+    contrasena_nueva = payload.contrasena_nueva.strip()
+    if not contrasena_actual:
+        raise HTTPException(status_code=400, detail="Ingresa tu contraseña actual")
+    if not contrasena_nueva:
+        raise HTTPException(status_code=400, detail="Ingresa tu nueva contraseña")
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT hash_contrasena
+                    FROM seguridad.usuario
+                    WHERE id = %s
+                      AND estado = 'activo'
+                    LIMIT 1
+                    """,
+                    (usuario["sub"],),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=401, detail="Usuario no encontrado")
+                hash_actual = str(row["hash_contrasena"] or "").strip()
+                if not bcrypt.checkpw(contrasena_actual.encode("utf-8"), hash_actual.encode("utf-8")):
+                    raise HTTPException(status_code=401, detail="Contraseña actual incorrecta")
+                nuevo_hash = bcrypt.hashpw(contrasena_nueva.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                cur.execute(
+                    """
+                    UPDATE seguridad.usuario
+                    SET hash_contrasena = %s,
+                        forzar_cambio_contrasena = false
+                    WHERE id = %s
+                    """,
+                    (nuevo_hash, usuario["sub"]),
+                )
+    return {"ok": True}
+
+
+@app.post("/api/auth/establecer-contrasena")
+def establecer_contrasena(payload: EstablecerContrasenaPayload, usuario=Depends(verificar_jwt)):
+    contrasena_nueva = payload.contrasena_nueva
+    if not contrasena_nueva:
+        raise HTTPException(status_code=400, detail="Ingresa tu nueva contraseña")
+    if len(contrasena_nueva.encode("utf-8")) > 72:
+        raise HTTPException(status_code=400, detail="La contraseña es demasiado larga")
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT forzar_cambio_contrasena FROM seguridad.usuario WHERE id = %s AND estado = 'activo' FOR UPDATE",
+                    (usuario["sub"],),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=401, detail="Usuario no encontrado")
+                if not row["forzar_cambio_contrasena"]:
+                    raise HTTPException(status_code=409, detail="El cambio obligatorio ya fue completado")
+                nuevo_hash = bcrypt.hashpw(contrasena_nueva.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                cur.execute(
+                    "UPDATE seguridad.usuario SET hash_contrasena = %s, forzar_cambio_contrasena = false WHERE id = %s",
+                    (nuevo_hash, usuario["sub"]),
+                )
+    return {"ok": True}
+
+
+@app.put("/api/auth/foto-perfil")
+def subir_foto_perfil(payload: FotoPerfilPayload, usuario=Depends(verificar_jwt)):
+    foto = comprimir_foto(payload.contenidoBase64)
+    ruta = guardar_foto(_connection_kwargs(), image_storage_dir, usuario["sub"], foto)
+    return {"fotoUrl": ruta}
+
+
+@app.delete("/api/auth/foto-perfil")
+def quitar_foto_perfil(usuario=Depends(verificar_jwt)):
+    guardar_foto(_connection_kwargs(), image_storage_dir, usuario["sub"], None)
+    return {"fotoUrl": ""}
 
 
 @app.post("/api/interacciones/publicacion")
@@ -502,6 +635,29 @@ def confirmar_pago(payload: ConfirmacionPagoPayload, usuario=Depends(_jwt_opcion
     return {"ok": True, "solicitudId": solicitud_id, "estado": "pendiente"}
 
 
+@app.post("/api/publico/solicitud-carrito")
+def registrar_solicitud_carrito(payload: SolicitudCarritoPayload, usuario=Depends(_jwt_opcional)):
+    _ensure_pago_tables()
+    items = [item for item in payload.items if isinstance(item, dict)]
+    if not items:
+        raise HTTPException(status_code=400, detail="El carrito esta vacio")
+    total_pen = round(sum(float(item.get("precio", 0) or 0) * int(item.get("cantidad", 1) or 1) for item in items if item.get("moneda") == "PEN"), 2)
+    total_usd = round(sum(float(item.get("precio", 0) or 0) * int(item.get("cantidad", 1) or 1) for item in items if item.get("moneda") == "USD"), 2)
+    solicitud_id = str(uuid4())
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO publicacion.solicitud_carrito (
+                    id, usuario_id, invitado_nombre, invitado_whatsapp, items, total_pen, total_usd
+                ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
+                """,
+                (solicitud_id, usuario.get("sub") if usuario else None, payload.invitadoNombre.strip()[:160], payload.invitadoWhatsapp.strip()[:30], json.dumps(items, ensure_ascii=False), total_pen, total_usd),
+            )
+            conn.commit()
+    return {"ok": True, "solicitudId": solicitud_id}
+
+
 @app.get("/api/cliente/almacen")
 def listar_almacen_cliente(usuario=Depends(verificar_jwt)):
     _ensure_pago_tables()
@@ -524,7 +680,7 @@ def listar_almacen_cliente(usuario=Depends(verificar_jwt)):
         "envioTipo": row["envio_tipo"],
         "destinatarioId": str(row["destinatario_id"]) if row["destinatario_id"] else None,
         "envioSolicitadoEn": row["envio_solicitado_en"].isoformat() if row["envio_solicitado_en"] else None,
-    } for row in rows]
+} for row in rows]
 
 
 @app.get("/api/cliente/destinatarios")
@@ -612,7 +768,13 @@ def solicitar_envio_almacen(pago_id: str, payload: SolicitudEnvioPayload, usuari
 
 
 @app.get("/api/publico/catalogo")
-def listar_catalogo_publico():
+def listar_catalogo_publico(
+    paginado: bool = False, pagina: int = Query(default=1, ge=1), limite: int = Query(default=20, ge=1, le=20),
+    orden: Literal['reciente', 'antiguo', 'menor-precio', 'mayor-precio', 'visitados'] = 'reciente',
+    busqueda: str = '', plataforma: str = '', ids: str = '',
+):
+    if paginado:
+        return pagina_catalogo(_connection_kwargs(), pagina, limite, orden, busqueda, plataforma, ids)
     with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -685,6 +847,16 @@ def listar_catalogo_publico():
         }
         for row in rows
     ]
+
+
+@app.get('/api/publico/publicaciones/{publicacion_id}')
+def detalle_publicacion_publica(publicacion_id: str):
+    with connect(**_connection_kwargs(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            items = detalle_items(cur, [publicacion_id], True)
+    if not items:
+        raise HTTPException(status_code=404, detail='Publicación no disponible')
+    return items
 
 
 def _ultima_publicacion_publica() -> dict[str, Any] | None:

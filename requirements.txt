@@ -3,3 +3,5 @@ uvicorn
 pg8000
 bcrypt
 PyJWT
+Pillow
+limits[redis]>=5.8,<6
