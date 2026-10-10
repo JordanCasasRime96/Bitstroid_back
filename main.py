@@ -29,6 +29,8 @@ from whatsapp_entrada import (solicitar_validacion, estado_validacion, crear_reg
     configuracion as configuracion_whatsapp, verificar_firma, verificar_webhook, procesar_mensajes,
     preparar_tabla as preparar_registro_whatsapp)
 from whatsapp_respuestas import despachar as despachar_respuestas, diagnostico_db
+import whatsapp_bot
+from whatsapp_contactos import mensajes_entrantes
 
 JWT_FALLBACK_SECRET = "bitstroid-local-dev-secret-32-bytes-minimo"
 
@@ -39,6 +41,7 @@ async def lifespan(app):
         logger.warning("WhatsApp: WHATSAPP_ACCESS_TOKEN ausente; las respuestas automaticas estan desactivadas")
     else:
         logger.info("WhatsApp: worker de respuestas automaticas iniciado")
+    logger.info("WhatsApp: bot interactivo %s", "habilitado; requiere smb_message_echoes para pausa humana" if whatsapp_bot.habilitado() else "desactivado (WHATSAPP_BOT_ENABLED)")
     try:
         configuracion_whatsapp()
     except HTTPException:
@@ -52,6 +55,7 @@ async def lifespan(app):
                         await run_in_threadpool(preparar_registro_whatsapp, tuple(sorted(_connection_kwargs().items())))
                         preparado = True
                     await run_in_threadpool(despachar_respuestas, _connection_kwargs())
+                    await run_in_threadpool(whatsapp_bot.despachar, _connection_kwargs())
                 except Exception as error:
                     logger.warning("Cola WhatsApp no disponible: %s", diagnostico_db(error))
                     await asyncio.sleep(28)
@@ -452,6 +456,9 @@ async def recibir_whatsapp(request: Request):
         raise HTTPException(400, "Webhook invalido") from None
     logging.getLogger("uvicorn.error").info("Webhook WhatsApp: POST firmado recibido")
     await run_in_threadpool(procesar_mensajes, _connection_kwargs(), payload)
+    phone_id = configuracion_whatsapp()[3]
+    await run_in_threadpool(whatsapp_bot.procesar, _connection_kwargs(), payload,
+                           list(mensajes_entrantes(payload, phone_id)), phone_id)
     return {"ok": True}
 
 

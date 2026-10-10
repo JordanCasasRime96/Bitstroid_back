@@ -174,3 +174,13 @@ ORDER BY ultimo_mensaje_en DESC;
 
 No se agrega interfaz administrativa en esta etapa. Restringir acceso al esquema
 al personal autorizado y definir retencion/eliminacion de datos antes de produccion.
+# Flows: funcion suspendida
+
+Alternativa implementada con listas y botones, sin Flows:
+[WHATSAPP_BOT.md](WHATSAPP_BOT.md). La verificacion pendiente no activa ni bloquea
+esta implementacion local; su disponibilidad real debe probarse con el numero.
+
+Desde el 2026-10-09, el menu de compras y entregas queda incompleto y sin activar
+por la verificacion pendiente del negocio en Meta. Estado, archivos preparados
+y pasos para retomarlo: [flows/README.md](flows/README.md).
+El registro y la validacion actuales por WhatsApp siguen independientes.

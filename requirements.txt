@@ -5,3 +5,4 @@ bcrypt
 PyJWT
 Pillow
 limits[redis]>=5.8,<6
+tzdata

@@ -67,18 +67,24 @@ def encolar(cur, evento, phone_id, numero, tipo, timestamp=None):
 
 
 def enviar(numero, tipo, phone_id):
+    return enviar_payload(numero, {"type": "text", "text": {"body": TEXTOS[tipo]}}, phone_id)
+
+
+def enviar_payload(numero, payload, phone_id):
     token = getenv("WHATSAPP_ACCESS_TOKEN", "").strip()
     version = getenv("WHATSAPP_API_VERSION", "v21.0").strip()
     if not token or not re.fullmatch(r"v\d+\.\d+", version) or not phone_id.isdigit():
         raise ValueError("Configuracion de envio de WhatsApp incompleta")
-    body = json.dumps({"messaging_product": "whatsapp", "to": numero, "type": "text",
-                       "text": {"body": TEXTOS[tipo]}}).encode()
+    body = json.dumps({"messaging_product": "whatsapp", **({"to": numero} if "status" not in payload else {}), **payload}).encode()
     request = Request(f"https://graph.facebook.com/{version}/{phone_id}/messages", data=body,
                       headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
     with urlopen(request, timeout=8) as response:
         result = json.load(response)
+    if payload.get("status") == "read" and isinstance(result, dict) and result.get("success"):
+        return result
     if not isinstance(result, dict) or not result.get("messages", [{}])[0].get("id"):
         raise ValueError("WhatsApp no confirmo la aceptacion del mensaje")
+    return result
 
 
 def despachar(kwargs):

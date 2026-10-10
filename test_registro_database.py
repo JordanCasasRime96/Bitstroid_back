@@ -38,7 +38,7 @@ class RegistroDatabaseTests(unittest.TestCase):
         try:
             with conn.cursor() as cur:
                 # Run runtime DDL inside the outer rollback-only transaction.
-                for name in ("whatsapp_contactos.py", "whatsapp_respuestas.py", "whatsapp_entrada.py"):
+                for name in ("whatsapp_contactos.py", "whatsapp_respuestas.py", "whatsapp_entrada.py", "whatsapp_entregas.py"):
                     tree = ast.parse((Path(__file__).parent / name).read_text(encoding="utf-8"))
                     for node in ast.walk(tree):
                         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -88,6 +88,34 @@ class RegistroDatabaseTests(unittest.TestCase):
                         reparado = cur.fetchone()
                         self.assertEqual(reparado["nombres"], nombre or perfil or None)
                         self.assertEqual(reparado["correo"], correo or None)
+                        if perfil:
+                            import whatsapp_entregas as entregas
+                            cur.execute("SELECT id FROM whatsapp.contacto WHERE numero = %s", (numero,))
+                            contacto_id = str(cur.fetchone()["id"])
+                            direccion_id = str(uuid4())
+                            cur.execute("""INSERT INTO cliente.destinatario_envio
+                                (id, usuario_id, nombre_completo, dni, direccion, provincia, distrito, contacto)
+                                VALUES (%s, %s, %s, '00000000', 'Direccion de prueba', 'Lima', 'Lima', %s)""",
+                                (direccion_id, str(row["id"]), perfil, numero))
+                            self.assertIn(direccion_id, [str(d["id"]) for d in entregas.datos_envio(cur, contacto_id)])
+                            for modalidad, pago in [("olva", "anticipado"), ("shalom", "destino"), ("contraentrega", "no_aplica")]:
+                                evento = "prueba:" + uuid4().hex
+                                entrega = entregas.crear_solicitud(cur, contacto_id, modalidad, config[3], evento)
+                                self.assertTrue(entrega["creada"])
+                                self.assertEqual(entrega["pagoEnvio"], pago)
+                                repetida = entregas.crear_solicitud(cur, contacto_id, modalidad, config[3], evento)
+                                self.assertFalse(repetida["creada"])
+                # A WhatsApp contact without a web account can also own shipping data.
+                contacto_id, direccion_id = str(uuid4()), str(uuid4())
+                numero = "519" + str(int(uuid4().hex[:8], 16) % 100000000).zfill(8)
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO whatsapp.contacto (id, numero, primer_mensaje_en, ultimo_mensaje_en)
+                        VALUES (%s, %s, now(), now())""", (contacto_id, numero))
+                    cur.execute("""INSERT INTO cliente.destinatario_envio
+                        (id, contacto_whatsapp_id, nombre_completo, dni, direccion, provincia, distrito, contacto)
+                        VALUES (%s, %s, 'Contacto de prueba', '00000000', 'Direccion de prueba', 'Lima', 'Lima', %s)""",
+                        (direccion_id, contacto_id, numero))
+                    self.assertEqual(str(entregas.datos_envio(cur, contacto_id)[0]["id"]), direccion_id)
         finally:
             conn.rollback()
             conn._conn.close()

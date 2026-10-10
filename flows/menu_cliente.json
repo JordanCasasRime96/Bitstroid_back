@@ -1,0 +1,125 @@
+{
+  "version": "7.3",
+  "screens": [
+    {
+      "id": "MENU",
+      "title": "Bitstroid",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "NavigationList",
+            "name": "menu",
+            "list-items": [
+              {
+                "id": "mis_compras",
+                "main-content": { "title": "Mis compras" },
+                "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "COMPRAS" }, "payload": {} }
+              },
+              {
+                "id": "solicitar_entrega",
+                "main-content": { "title": "Solicitar entrega" },
+                "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "ENTREGA" }, "payload": {} }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "COMPRAS",
+      "title": "Mis compras",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "Consultaremos las compras asociadas a tu WhatsApp y te enviaremos el detalle por este chat." },
+          { "type": "Footer", "label": "Consultar mis compras", "on-click-action": { "name": "complete", "payload": { "accion": "mis_compras" } } }
+        ]
+      }
+    },
+    {
+      "id": "ENTREGA",
+      "title": "Solicitar entrega",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "NavigationList",
+            "name": "entrega",
+            "list-items": [
+              {
+                "id": "contraentrega",
+                "main-content": { "title": "Contraentrega" },
+                "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "CONTRAENTREGA" }, "payload": {} }
+              },
+              {
+                "id": "olva",
+                "main-content": { "title": "Envío por Olva" },
+                "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "OLVA" }, "payload": {} }
+              },
+              {
+                "id": "shalom",
+                "main-content": { "title": "Envío por Shalom" },
+                "on-click-action": { "name": "navigate", "next": { "type": "screen", "name": "SHALOM" }, "payload": {} }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONTRAENTREGA",
+      "title": "Contraentrega",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextHeading", "text": "Recoge en Feria Grau" },
+          { "type": "TextBody", "text": "Las entregas se realizan los sábados, de 1:00 p. m. a 6:00 p. m., en Feria Grau." },
+          { "type": "TextBody", "text": "Solicita hasta el viernes a las 5:00 p. m. Las solicitudes posteriores se atenderán el sábado de la semana siguiente. Horario de Lima." },
+          { "type": "TextCaption", "text": "Confirmaremos por este chat la fecha de tu entrega." },
+          { "type": "Footer", "label": "Confirmar solicitud", "on-click-action": { "name": "complete", "payload": { "accion": "solicitar_entrega", "modalidad": "contraentrega" } } }
+        ]
+      }
+    },
+    {
+      "id": "OLVA",
+      "title": "Envío por Olva",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "El tarifario varía según el destino: Lima, provincia y distrito. Confirmaremos el costo antes del despacho." },
+          { "type": "TextBody", "text": "El pago del envío se realiza antes del despacho." },
+          { "type": "TextCaption", "text": "Revisaremos tus datos guardados o te solicitaremos los datos necesarios para el envío." },
+          { "type": "Footer", "label": "Solicitar envío", "on-click-action": { "name": "complete", "payload": { "accion": "solicitar_entrega", "modalidad": "olva" } } }
+        ]
+      }
+    },
+    {
+      "id": "SHALOM",
+      "title": "Envío por Shalom",
+      "terminal": true,
+      "success": true,
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextBody", "text": "El tarifario varía según el destino: Lima, provincia, distrito y agencia. Confirmaremos el costo antes del despacho." },
+          { "type": "TextBody", "text": "El envío se realiza con Pago destino: pagas el envío al recoger tu paquete en la agencia de Shalom." },
+          { "type": "TextCaption", "text": "Revisaremos tus datos guardados o te solicitaremos los datos necesarios para el envío." },
+          { "type": "Footer", "label": "Solicitar envío", "on-click-action": { "name": "complete", "payload": { "accion": "solicitar_entrega", "modalidad": "shalom" } } }
+        ]
+      }
+    }
+  ]
+}
