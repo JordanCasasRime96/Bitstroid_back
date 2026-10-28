@@ -31,6 +31,7 @@ from whatsapp_entrada import (solicitar_validacion, estado_validacion, crear_reg
 from whatsapp_respuestas import despachar as despachar_respuestas, diagnostico_db
 import whatsapp_bot
 from whatsapp_contactos import mensajes_entrantes
+import visitas
 
 JWT_FALLBACK_SECRET = "bitstroid-local-dev-secret-32-bytes-minimo"
 
@@ -814,6 +815,19 @@ def solicitar_envio_almacen(pago_id: str, payload: SolicitudEnvioPayload, usuari
                 raise HTTPException(status_code=404, detail="Compra no encontrada")
             conn.commit()
     return {"ok": True, "envioTipo": payload.tipo, "envioSolicitadoEn": row["envio_solicitado_en"].isoformat()}
+
+
+@app.post("/api/publico/visitas", status_code=204)
+async def registrar_visita(request: Request):
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 2048:
+            raise HTTPException(413, 'Solicitud demasiado grande')
+    datos = visitas.validar(bytes(body), request.headers.get('x-visita-tiempo', ''),
+                            request.headers.get('x-visita-firma', ''))
+    await run_in_threadpool(visitas.guardar, _connection_kwargs(), datos)
+    return Response(status_code=204)
 
 
 @app.get("/api/publico/catalogo")
