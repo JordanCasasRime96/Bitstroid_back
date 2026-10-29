@@ -1,0 +1,10 @@
+# Entorno y archivos generados
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
+.pytest_cache/

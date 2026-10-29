@@ -1,0 +1,1349 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Bitstroid API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Login",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/registro/solicitud": {
+      "post": {
+        "summary": "Solicitud Registro",
+        "operationId": "solicitud_registro_api_auth_registro_solicitud_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistroPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/registro/estado/{verificacion_id}": {
+      "get": {
+        "summary": "Estado Registro",
+        "operationId": "estado_registro_api_auth_registro_estado__verificacion_id__get",
+        "parameters": [
+          {
+            "name": "verificacion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Verificacion Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/registro": {
+      "post": {
+        "summary": "Registrar",
+        "operationId": "registrar_api_auth_registro_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificarRegistroPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/whatsapp": {
+      "get": {
+        "summary": "Confirmar Webhook",
+        "operationId": "confirmar_webhook_api_webhooks_whatsapp_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Recibir Whatsapp",
+        "operationId": "recibir_whatsapp_api_webhooks_whatsapp_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "summary": "Me",
+        "operationId": "me_api_auth_me_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/cambiar-contrasena": {
+      "post": {
+        "summary": "Cambiar Contrasena",
+        "operationId": "cambiar_contrasena_api_auth_cambiar_contrasena_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CambiarContrasenaPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/establecer-contrasena": {
+      "post": {
+        "summary": "Establecer Contrasena",
+        "operationId": "establecer_contrasena_api_auth_establecer_contrasena_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstablecerContrasenaPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/foto-perfil": {
+      "put": {
+        "summary": "Subir Foto Perfil",
+        "operationId": "subir_foto_perfil_api_auth_foto_perfil_put",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FotoPerfilPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Quitar Foto Perfil",
+        "operationId": "quitar_foto_perfil_api_auth_foto_perfil_delete",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/interacciones/publicacion": {
+      "post": {
+        "summary": "Registrar Interaccion Publicacion",
+        "operationId": "registrar_interaccion_publicacion_api_interacciones_publicacion_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InteraccionPublicacionPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/interacciones/preferencias": {
+      "get": {
+        "summary": "Obtener Preferencias Publicacion",
+        "operationId": "obtener_preferencias_publicacion_api_interacciones_preferencias_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/publico/configuracion-pago": {
+      "get": {
+        "summary": "Obtener Configuracion Pago Publica",
+        "operationId": "obtener_configuracion_pago_publica_api_publico_configuracion_pago_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/publico/pagos/confirmar": {
+      "post": {
+        "summary": "Confirmar Pago",
+        "operationId": "confirmar_pago_api_publico_pagos_confirmar_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmacionPagoPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/publico/solicitud-carrito": {
+      "post": {
+        "summary": "Registrar Solicitud Carrito",
+        "operationId": "registrar_solicitud_carrito_api_publico_solicitud_carrito_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolicitudCarritoPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cliente/almacen": {
+      "get": {
+        "summary": "Listar Almacen Cliente",
+        "operationId": "listar_almacen_cliente_api_cliente_almacen_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cliente/destinatarios": {
+      "get": {
+        "summary": "Listar Destinatarios Cliente",
+        "operationId": "listar_destinatarios_cliente_api_cliente_destinatarios_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Crear Destinatario Cliente",
+        "operationId": "crear_destinatario_cliente_api_cliente_destinatarios_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DestinatarioEnvioPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cliente/almacen/{pago_id}/solicitar-envio": {
+      "post": {
+        "summary": "Solicitar Envio Almacen",
+        "operationId": "solicitar_envio_almacen_api_cliente_almacen__pago_id__solicitar_envio_post",
+        "parameters": [
+          {
+            "name": "pago_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pago Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolicitudEnvioPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/publico/visitas": {
+      "post": {
+        "summary": "Registrar Visita",
+        "operationId": "registrar_visita_api_publico_visitas_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
+    "/api/publico/catalogo": {
+      "get": {
+        "summary": "Listar Catalogo Publico",
+        "operationId": "listar_catalogo_publico_api_publico_catalogo_get",
+        "parameters": [
+          {
+            "name": "paginado",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Paginado"
+            }
+          },
+          {
+            "name": "pagina",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Pagina"
+            }
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limite"
+            }
+          },
+          {
+            "name": "orden",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "reciente",
+                "antiguo",
+                "menor-precio",
+                "mayor-precio",
+                "visitados"
+              ],
+              "type": "string",
+              "default": "reciente",
+              "title": "Orden"
+            }
+          },
+          {
+            "name": "busqueda",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Busqueda"
+            }
+          },
+          {
+            "name": "plataforma",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Plataforma"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Ids"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/publico/publicaciones/{publicacion_id}": {
+      "get": {
+        "summary": "Detalle Publicacion Publica",
+        "operationId": "detalle_publicacion_publica_api_publico_publicaciones__publicacion_id__get",
+        "parameters": [
+          {
+            "name": "publicacion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Publicacion Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/publico/catalogo/eventos": {
+      "get": {
+        "summary": "Eventos Catalogo Publico",
+        "operationId": "eventos_catalogo_publico_api_publico_catalogo_eventos_get",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CambiarContrasenaPayload": {
+        "properties": {
+          "contrasena_actual": {
+            "type": "string",
+            "title": "Contrasena Actual"
+          },
+          "contrasena_nueva": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Contrasena Nueva"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contrasena_actual",
+          "contrasena_nueva"
+        ],
+        "title": "CambiarContrasenaPayload"
+      },
+      "ConfirmacionPagoPayload": {
+        "properties": {
+          "total": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "comprobanteNombre": {
+            "type": "string",
+            "title": "Comprobantenombre"
+          },
+          "comprobanteMimeType": {
+            "type": "string",
+            "title": "Comprobantemimetype"
+          },
+          "comprobanteContenidoBase64": {
+            "type": "string",
+            "title": "Comprobantecontenidobase64"
+          },
+          "invitadoNombre": {
+            "type": "string",
+            "title": "Invitadonombre",
+            "default": ""
+          },
+          "invitadoWhatsapp": {
+            "type": "string",
+            "title": "Invitadowhatsapp",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "comprobanteNombre",
+          "comprobanteMimeType",
+          "comprobanteContenidoBase64"
+        ],
+        "title": "ConfirmacionPagoPayload"
+      },
+      "DestinatarioEnvioPayload": {
+        "properties": {
+          "nombreCompleto": {
+            "type": "string",
+            "title": "Nombrecompleto"
+          },
+          "dni": {
+            "type": "string",
+            "title": "Dni"
+          },
+          "direccion": {
+            "type": "string",
+            "title": "Direccion"
+          },
+          "referencia": {
+            "type": "string",
+            "title": "Referencia",
+            "default": ""
+          },
+          "provincia": {
+            "type": "string",
+            "title": "Provincia"
+          },
+          "distrito": {
+            "type": "string",
+            "title": "Distrito"
+          },
+          "contacto": {
+            "type": "string",
+            "title": "Contacto"
+          },
+          "predeterminado": {
+            "type": "boolean",
+            "title": "Predeterminado",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "nombreCompleto",
+          "dni",
+          "direccion",
+          "provincia",
+          "distrito",
+          "contacto"
+        ],
+        "title": "DestinatarioEnvioPayload"
+      },
+      "EstablecerContrasenaPayload": {
+        "properties": {
+          "contrasena_nueva": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Contrasena Nueva"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contrasena_nueva"
+        ],
+        "title": "EstablecerContrasenaPayload"
+      },
+      "FotoPerfilPayload": {
+        "properties": {
+          "contenidoBase64": {
+            "type": "string",
+            "maxLength": 350000,
+            "minLength": 1,
+            "title": "Contenidobase64"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contenidoBase64"
+        ],
+        "title": "FotoPerfilPayload"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InteraccionPublicacionPayload": {
+        "properties": {
+          "publicacionId": {
+            "type": "string",
+            "title": "Publicacionid"
+          },
+          "categoria": {
+            "type": "string",
+            "title": "Categoria",
+            "default": ""
+          },
+          "evento": {
+            "type": "string",
+            "title": "Evento",
+            "default": "click"
+          }
+        },
+        "type": "object",
+        "required": [
+          "publicacionId"
+        ],
+        "title": "InteraccionPublicacionPayload"
+      },
+      "LoginPayload": {
+        "properties": {
+          "credencial": {
+            "type": "string",
+            "maxLength": 254,
+            "title": "Credencial"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "credencial",
+          "password"
+        ],
+        "title": "LoginPayload"
+      },
+      "RegistroPayload": {
+        "properties": {
+          "apodo": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Apodo"
+          },
+          "whatsapp": {
+            "type": "string",
+            "maxLength": 25,
+            "minLength": 1,
+            "title": "Whatsapp"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Password"
+          },
+          "nombres": {
+            "type": "string",
+            "maxLength": 160,
+            "title": "Nombres",
+            "default": ""
+          },
+          "correo": {
+            "type": "string",
+            "maxLength": 254,
+            "title": "Correo",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "apodo",
+          "whatsapp",
+          "password"
+        ],
+        "title": "RegistroPayload"
+      },
+      "SolicitudCarritoPayload": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "invitadoNombre": {
+            "type": "string",
+            "title": "Invitadonombre",
+            "default": ""
+          },
+          "invitadoWhatsapp": {
+            "type": "string",
+            "title": "Invitadowhatsapp",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "SolicitudCarritoPayload"
+      },
+      "SolicitudEnvioPayload": {
+        "properties": {
+          "tipo": {
+            "type": "string",
+            "title": "Tipo"
+          },
+          "destinatarioId": {
+            "type": "string",
+            "title": "Destinatarioid",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "tipo"
+        ],
+        "title": "SolicitudEnvioPayload"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerificarRegistroPayload": {
+        "properties": {
+          "verificacionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Verificacionid"
+          },
+          "verificacionToken": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Verificaciontoken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verificacionId",
+          "verificacionToken"
+        ],
+        "title": "VerificarRegistroPayload"
+      }
+    }
+  }
+}
